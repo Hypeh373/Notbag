@@ -22,7 +22,9 @@ from telebot.apihelper import ApiTelegramException
 BOT_TOKEN = os.getenv("EXCHANGE_BOT_TOKEN")
 DB_PATH = os.getenv("EXCHANGE_DB", "exchange.db")
 # Ссылка на вашего конструктора (используется и для подписи, и для кнопки «Хочу такого же бота»)
-CREATOR_DEFAULT_LINK = "https://t.me/YourCreatorBot"
+# И username конструктора можно переопределить прямо здесь или через переменную окружения CREATOR_USERNAME.
+CREATOR_USERNAME_DEFAULT = "@YourCreatorBot"
+CREATOR_DEFAULT_LINK = f"https://t.me/{CREATOR_USERNAME_DEFAULT.lstrip('@')}"
 # Parse ADMIN_IDS from env
 raw_admins = os.getenv("ADMIN_IDS", "")
 ADMIN_IDS = set()
@@ -266,19 +268,63 @@ def _creator_label_html(label: str, normalized_link: str) -> str:
     return safe_label or safe_link
 
 
+def _normalize_creator_username(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    trimmed = value.strip()
+    if not trimmed:
+        return ""
+    if trimmed.startswith("https://t.me/"):
+        trimmed = trimmed.split("https://t.me/", 1)[1]
+    trimmed = trimmed.lstrip("@").strip()
+    if not trimmed:
+        return ""
+    return f"@{trimmed}"
+
+
 _TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled", "y"}
-CREATOR_BRANDING_ENABLED = os.getenv("CREATOR_BRANDING", "false").strip().lower() in _TRUE_VALUES
-CREATOR_CONTACT_URL = _normalize_creator_link(os.getenv("CREATOR_CONTACT_URL") or CREATOR_DEFAULT_LINK)
-CREATOR_CONTACT_LABEL = _derive_creator_label(os.getenv("CREATOR_CONTACT_LABEL", ""), CREATOR_CONTACT_URL)
+
+
+def _env_flag(*names: str, default: bool = False) -> bool:
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        if value.strip().lower() in _TRUE_VALUES:
+            return True
+    return default
+
+
+CREATOR_BRANDING_ENABLED = _env_flag("CREATOR_BRANDING")
+CREATOR_USERNAME = _normalize_creator_username(os.getenv("CREATOR_USERNAME") or CREATOR_USERNAME_DEFAULT)
+creator_link_env = os.getenv("CREATOR_CONTACT_URL")
+if creator_link_env:
+    _creator_contact_url_source = creator_link_env
+elif CREATOR_USERNAME:
+    _creator_contact_url_source = f"https://t.me/{CREATOR_USERNAME.lstrip('@')}"
+else:
+    _creator_contact_url_source = CREATOR_DEFAULT_LINK
+
+CREATOR_CONTACT_URL = _normalize_creator_link(_creator_contact_url_source)
+CREATOR_CONTACT_LABEL = _derive_creator_label(os.getenv("CREATOR_CONTACT_LABEL", CREATOR_USERNAME), CREATOR_CONTACT_URL)
 CREATOR_CONTACT_BUTTON_LABEL = (
     os.getenv("CREATOR_CONTACT_BUTTON_LABEL", "🤖 Хочу такого же бота").strip() or "🤖 Хочу такого же бота"
 )
 CREATOR_BRANDING_MESSAGE_TEMPLATE = (
     os.getenv("CREATOR_BRANDING_MESSAGE", "🤖 Бот создан с помощью {label_html}").strip()
 )
+VIP_BRANDING_DISABLED = _env_flag(
+    "EXCHANGE_VIP_ACTIVE",
+    "VIP_ACTIVE",
+    "VIP_MODE",
+    "VIP_BRANDING_DISABLED",
+    "CREATOR_VIP_ACTIVE",
+)
 
 
 def is_creator_branding_active() -> bool:
+    if VIP_BRANDING_DISABLED:
+        return False
     return CREATOR_BRANDING_ENABLED and bool(CREATOR_CONTACT_URL or CREATOR_CONTACT_LABEL)
 
 
@@ -335,6 +381,105 @@ def normalize_chat_username(value: str) -> Optional[str]:
     if not value.replace('_', '').isalnum():
         return None
     return f"@{value}"
+
+
+_ADMIN_CHAT_CACHE = {"raw_id": None, "raw_username": None, "info": None}
+
+
+def _build_admin_chat_info(raw_id: str, raw_username: str) -> Dict[str, Any]:
+    numeric_id: Optional[int] = None
+    username_label: Optional[str] = None
+    username_lower: Optional[str] = None
+
+    def consider(candidate: Optional[str]) -> None:
+        nonlocal numeric_id, username_label, username_lower
+        if not candidate:
+            return
+        cleaned = str(candidate).strip()
+        if not cleaned:
+            return
+        if numeric_id is None and cleaned.lstrip("-").isdigit():
+            try:
+                numeric_id = int(cleaned)
+                return
+            except ValueError:
+                pass
+        if username_label is None:
+            normalized = normalize_chat_username(cleaned)
+            if normalized:
+                username_label = normalized
+                username_lower = normalized.lower()
+
+    consider(raw_id)
+    consider(raw_username)
+
+    if username_label is None and raw_username:
+        normalized = normalize_chat_username(raw_username)
+        if normalized:
+            username_label = normalized
+            username_lower = normalized.lower()
+
+    target: Optional[Any] = None
+    if numeric_id is not None:
+        target = numeric_id
+    elif username_label:
+        target = username_label
+
+    display = "Не установлен"
+    if username_label:
+        display = username_label
+    elif numeric_id is not None:
+        display = str(numeric_id)
+    elif raw_id:
+        display = raw_id
+    elif raw_username:
+        display = raw_username
+
+    return {
+        "raw_id": raw_id,
+        "raw_username": raw_username,
+        "numeric_id": numeric_id,
+        "username_label": username_label,
+        "username_lower": username_lower,
+        "target": target,
+        "display": display,
+        "is_configured": target is not None,
+    }
+
+
+def invalidate_admin_chat_cache() -> None:
+    global _ADMIN_CHAT_CACHE
+    _ADMIN_CHAT_CACHE = {"raw_id": None, "raw_username": None, "info": None}
+
+
+def get_admin_chat_info(force_refresh: bool = False) -> Dict[str, Any]:
+    raw_id = db.get_setting('admin_chat_id') or ""
+    raw_username = db.get_setting('admin_chat_username') or ""
+    global _ADMIN_CHAT_CACHE
+    if (
+        not force_refresh
+        and _ADMIN_CHAT_CACHE["info"] is not None
+        and _ADMIN_CHAT_CACHE["raw_id"] == raw_id
+        and _ADMIN_CHAT_CACHE["raw_username"] == raw_username
+    ):
+        return _ADMIN_CHAT_CACHE["info"]
+    info = _build_admin_chat_info(raw_id, raw_username)
+    _ADMIN_CHAT_CACHE = {"raw_id": raw_id, "raw_username": raw_username, "info": info}
+    return info
+
+
+def is_message_from_admin_chat(chat: types.Chat, admin_info: Dict[str, Any]) -> bool:
+    if not admin_info or not admin_info.get("is_configured"):
+        return False
+    numeric_id = admin_info.get("numeric_id")
+    if numeric_id is not None and int(chat.id) == int(numeric_id):
+        return True
+    username_lower = admin_info.get("username_lower")
+    chat_username = getattr(chat, "username", None)
+    if username_lower and chat_username:
+        if f"@{chat_username}".lower() == username_lower:
+            return True
+    return False
 
 def check_required_channels(user_id: int) -> List[Dict[str, str]]:
     channels = get_op_channels()
@@ -485,7 +630,8 @@ def admin_handler(message):
     markup.add(types.InlineKeyboardButton("📡 Обязательная подписка", callback_data="op_menu"))
     markup.add(types.InlineKeyboardButton("ℹ️ Помощь по настройке", callback_data="admin_help"))
     
-    current_chat = db.get_setting('admin_chat_id') or 'Не установлен'
+    admin_chat_info = get_admin_chat_info()
+    current_chat = admin_chat_info.get("display") or 'Не установлен'
     text = f"⚙️ Админ панель\n\nТекущий чат для заявок: {current_chat}"
     bot.send_message(message.chat.id, text, reply_markup=markup)
 
@@ -596,10 +742,13 @@ def callback_handler(call):
 def message_processor(message):
     user_id = message.from_user.id
     chat_id = message.chat.id
-    admin_chat_id_str = db.get_setting('admin_chat_id')
+    admin_chat_info = get_admin_chat_info()
+    admin_chat_target = admin_chat_info.get("target")
+    admin_chat_configured = admin_chat_info.get("is_configured")
+    in_admin_chat = admin_chat_configured and is_message_from_admin_chat(message.chat, admin_chat_info)
     is_admin = user_id in ADMIN_IDS
     
-    if not is_admin and (not admin_chat_id_str or str(chat_id) != str(admin_chat_id_str)):
+    if not is_admin and not in_admin_chat:
         ban_info = get_ban_record(user_id)
         if ban_info:
             bot.send_message(chat_id, f"🚫 Вы заблокированы.\nПричина: {ban_info.get('reason') or 'не указана'}", parse_mode="HTML")
@@ -629,8 +778,34 @@ def message_processor(message):
             except ApiTelegramException as e:
                 bot.send_message(chat_id, f"❌ Не удалось проверить чат: {e}")
                 return
-            db.set_setting('admin_chat_id', normalized)
-            bot.send_message(chat_id, f"✅ Чат заявок установлен: {normalized}\nБот подтверждён как администратор.")
+
+            resolved_chat_id = None
+            resolved_username = None
+            try:
+                chat_obj = bot.get_chat(normalized)
+                resolved_chat_id = getattr(chat_obj, "id", None)
+                resolved_username = getattr(chat_obj, "username", None)
+            except ApiTelegramException:
+                pass
+
+            if resolved_chat_id is not None:
+                db.set_setting('admin_chat_id', str(resolved_chat_id))
+            else:
+                db.set_setting('admin_chat_id', normalized)
+
+            if resolved_username:
+                db.set_setting('admin_chat_username', f"@{resolved_username}")
+            elif normalized.startswith("@"):
+                db.set_setting('admin_chat_username', normalized)
+            else:
+                db.set_setting('admin_chat_username', "")
+
+            invalidate_admin_chat_cache()
+            new_admin_chat_info = get_admin_chat_info()
+            bot.send_message(
+                chat_id,
+                f"✅ Чат заявок установлен: {new_admin_chat_info.get('display', normalized)}\nБот подтверждён как администратор.",
+            )
             del state[user_id]
             return
         elif action == 'waiting_for_welcome':
@@ -712,7 +887,7 @@ def message_processor(message):
             return
 
     # 2. OPERATOR REPLY LOGIC (In Admin Chat)
-    if admin_chat_id_str and str(chat_id) == str(admin_chat_id_str):
+    if admin_chat_configured and in_admin_chat:
         # This is a message in the admin chat
         if message.reply_to_message:
             # Check if we have a mapping for the message being replied to
@@ -732,14 +907,14 @@ def message_processor(message):
 
     # 3. USER MESSAGE -> FORWARD TO ADMIN CHAT
     # If not in admin state and not in admin chat (already handled above if chat_id == admin_chat_id)
-    if admin_chat_id_str and str(chat_id) != str(admin_chat_id_str):
+    if admin_chat_target and not in_admin_chat:
         # Ignore commands
         if message.text and message.text.startswith('/'):
             return
 
         try:
             # Forward the message to admin chat
-            fwd_msg = bot.forward_message(admin_chat_id_str, chat_id, message.message_id)
+            fwd_msg = bot.forward_message(admin_chat_target, chat_id, message.message_id)
             # Save mapping so we know who sent it
             db.save_msg_map(fwd_msg.message_id, user_id, message.message_id)
         except Exception as e:
