@@ -301,9 +301,19 @@ def is_banned(user_id):
 # Инициализация БД пользователей
 def _ensure_user_columns(cursor):
     cursor.execute("PRAGMA table_info(users)")
-    existing = [row[1] for row in cursor.fetchall()]
-    if 'search_gender' not in existing:
-        cursor.execute(f"ALTER TABLE users ADD COLUMN search_gender TEXT DEFAULT '{DEFAULT_SEARCH_GENDER}'")
+    existing = {row[1] for row in cursor.fetchall()}
+
+    safe_search_gender = DEFAULT_SEARCH_GENDER.replace("'", "''")
+    required_columns = {
+        'gender': "TEXT",
+        'premium': "INTEGER DEFAULT 0",
+        'search_gender': f"TEXT DEFAULT '{safe_search_gender}'",
+        'banned': "INTEGER DEFAULT 0",
+    }
+
+    for column_name, ddl in required_columns.items():
+        if column_name not in existing:
+            cursor.execute(f"ALTER TABLE users ADD COLUMN {column_name} {ddl}")
 
 
 def init_user_db():
