@@ -1,0 +1,407 @@
+Flyer API
+
+Download OpenAPI specification:Download
+
+Documentation Flyer API by @FlyerServiceBot
+API endpoint: api.flyerservice.io
+
+Library for Python
+https://github.com/EliCreator/flyerapi
+
+Install
+pip install flyerapi
+
+Get key data
+
+Retrieve information about the bot key.
+
+Request Body schema: application/json
+
+key
+
+required
+
+string
+
+Key of the bot
+
+Responses
+
+200 
+
+Successful response
+
+post/get_me
+
+Request samples
+
+Payload
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"key": "string"
+
+}
+
+Response samples
+
+200
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"type": "string",
+
+"key_number": 0,
+
+"bot_id": 0,
+
+"webhook": "string",
+
+"status": true,
+
+"error": "string"
+
+}
+
+Check subscription status
+
+Verify mandatory subscription status.
+
+Request Body schema: application/json
+
+key
+
+required
+
+string
+
+Key of the bot
+
+user_id
+
+required
+
+integer
+
+User ID
+
+language_code
+
+string
+
+User's language code
+
+message
+
+object
+
+Responses
+
+200 
+
+Successful response
+
+post/check
+
+Request samples
+
+Payload
+
+Content type
+
+application/json
+
+Copy
+
+Expand allCollapse all
+
+{
+
+"key": "string",
+
+"user_id": 0,
+
+"language_code": "string",
+
+"message": {
+
+"rows": 0,
+
+"text": "string",
+
+"button_bot": "string",
+
+"button_channel": "string",
+
+"button_boost": "string",
+
+"button_url": "string",
+
+"button_fp": "string"
+
+}
+
+}
+
+Response samples
+
+200
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"skip": true,
+
+"error": "string",
+
+"warning": "string",
+
+"info": "string"
+
+}
+
+Get tasks for user
+
+Retrieve tasks for the user. Resources are allocated for 1 hour.
+
+Request Body schema: application/json
+
+key
+
+required
+
+string
+
+Key of the bot
+
+user_id
+
+required
+
+integer
+
+User ID
+
+language_code
+
+string
+
+User's language code
+
+limit
+
+integer
+
+Limit for tasks (default: 5, max: 10)
+
+Responses
+
+200 
+
+Successful response
+
+post/get_tasks
+
+Request samples
+
+Payload
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"key": "string",
+
+"user_id": 0,
+
+"language_code": "string",
+
+"limit": 0
+
+}
+
+Response samples
+
+200
+
+Content type
+
+application/json
+
+Copy
+
+Expand allCollapse all
+
+{
+
+"result": [
+
+{}
+
+],
+
+"error": "string"
+
+}
+
+Check task status
+
+Verify the status of a task.
+
+Request Body schema: application/json
+
+key
+
+required
+
+string
+
+Key of the bot
+
+signature
+
+required
+
+string
+
+Task signature and identifier
+
+Responses
+
+200 
+
+Successful response
+
+post/check_task
+
+Request samples
+
+Payload
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"key": "string",
+
+"signature": "string"
+
+}
+
+Response samples
+
+200
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"result": "string",
+
+"error": "string"
+
+}
+
+Get completed tasks for user
+
+Retrieve completed tasks for the user.
+
+Request Body schema: application/json
+
+key
+
+required
+
+string
+
+Key of the bot
+
+user_id
+
+required
+
+integer
+
+User ID
+
+Responses
+
+200 
+
+Successful response
+
+post/get_completed_tasks
+
+Request samples
+
+Payload
+
+Content type
+
+application/json
+
+Copy
+
+{
+
+"key": "string",
+
+"user_id": 0
+
+}
+
+Response samples
+
+200
+
+Content type
+
+application/json
+
+Copy
+
+Expand allCollapse all
+
+{
+
+"result": {
+
+"completed_tasks": [],
+
+"count_all_tasks": 0
+
+},
+
+"error": "string"
+
+}
+
