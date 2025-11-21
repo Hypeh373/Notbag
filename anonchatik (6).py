@@ -44,6 +44,50 @@ try:
 except ValueError:
     FLYER_TASKS_LIMIT = 5
 
+
+def _parse_admin_ids(raw_value):
+    ids = set()
+    if not raw_value:
+        return ids
+    cleaned = str(raw_value).replace(';', ',')
+    for chunk in cleaned.split(','):
+        token = chunk.strip()
+        if not token:
+            continue
+        if token.startswith('+'):
+            token = token[1:]
+        if token.lstrip('-').isdigit():
+            try:
+                ids.add(int(token))
+            except ValueError:
+                continue
+    return ids
+
+
+ADMIN_IDS = _parse_admin_ids(os.getenv('ADMIN_IDS'))
+if not ADMIN_IDS:
+    ADMIN_IDS = _parse_admin_ids(get_bot_setting_from_creator(BOT_ID, 'admin_ids', ''))
+
+if not ADMIN_IDS:
+    fallback_admin_id = (
+        os.getenv('DEFAULT_ADMIN_ID')
+        or os.getenv('ADMIN_ID_DEFAULT')
+        or os.getenv('ADMIN_ID')
+        or get_bot_setting_from_creator(BOT_ID, 'admin_id', '')
+    )
+    if fallback_admin_id and str(fallback_admin_id).lstrip('-').isdigit():
+        ADMIN_IDS = {int(fallback_admin_id)}
+
+if not ADMIN_IDS:
+    try:
+        ADMIN_IDS = {int(get_bot_setting_from_creator(BOT_ID, 'owner_id', ''))}
+    except (TypeError, ValueError):
+        ADMIN_IDS = set()
+
+if not ADMIN_IDS:
+    # Последний резерв — вручную пропишите свой ID здесь, если нигде больше не задан.
+    ADMIN_IDS = {6745031200}
+
 def normalize_channel(raw_value: str) -> str:
     if not raw_value:
         return ''
@@ -414,27 +458,22 @@ def send_bulk_message(message_text):
 @bot.message_handler(func=lambda message: bool(message.text and message.text.startswith("Rassilka")))
 def handle_rassilka(message):
     user_id = message.chat.id
-    ADMIN_ID = 6745031200
-    
-    # Проверяем, является ли пользователь администратором
-    if user_id == ADMIN_ID:
-        # Извлекаем текст сообщения после слова "Rassilka"
-        message_text = message.text[8:].strip()  # Отрезаем "Rassilka" и оставляем остальной текст
-        
-        if message_text:
-            success_count, failure_count = send_bulk_message(message_text)
-            
-            # Отправляем отчет пользователю-администратору
-            report = (
-                f"Рассылка завершена!\n\n"
-                f"✅ Успешно доставлено: {success_count} сообщений\n"
-                f"❌ Не удалось доставить: {failure_count} сообщений"
-            )
-            bot.send_message(user_id, report)
-        else:
-            bot.send_message(user_id, "Пожалуйста, укажите текст для рассылки.")
-    else:
+    if not is_admin(user_id):
         bot.send_message(user_id, "У вас нет прав для отправки рассылки.")
+        return
+
+    message_text = message.text[8:].strip()
+    if not message_text:
+        bot.send_message(user_id, "Пожалуйста, укажите текст для рассылки.")
+        return
+
+    success_count, failure_count = send_bulk_message(message_text)
+    report = (
+        "Рассылка завершена!\n\n"
+        f"✅ Успешно доставлено: {success_count} сообщений\n"
+        f"❌ Не удалось доставить: {failure_count} сообщений"
+    )
+    bot.send_message(user_id, report)
 
 # Обработка кнопки "Премиум поиск 👑"
 @bot.message_handler(func=lambda message: message.text == "Премиум поиск 👑")
@@ -683,23 +722,16 @@ def stop_search(message):
 @bot.message_handler(func=lambda message: bool(message.text) and message.text.lower() == "alluser")
 def handle_alluser(message):
     user_id = message.chat.id
-    ADMIN_ID = 6745031200  # Замените на ваш ID
-
-    # Проверяем, является ли пользователь администратором
-    if user_id == ADMIN_ID:
-        conn = sqlite3.connect(USER_DB_PATH)
-        cursor = conn.cursor()
-
-        # Получаем количество всех пользователей
-        cursor.execute('SELECT COUNT(*) FROM users')
-        user_count = cursor.fetchone()[0]  # Получаем количество пользователей
-
-        conn.close()
-
-        # Отправляем количество пользователю
-        bot.send_message(user_id, f"Количество пользователей, запустивших бота: {user_count}")
-    else:
+    if not is_admin(user_id):
         bot.send_message(user_id, "У вас нет прав для получения этой информации.")
+        return
+
+    conn = sqlite3.connect(USER_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute('SELECT COUNT(*) FROM users')
+    user_count = cursor.fetchone()[0]
+    conn.close()
+    bot.send_message(user_id, f"Количество пользователей, запустивших бота: {user_count}")
 
 # Разрыв связи при команде "/stop"
 @bot.message_handler(func=lambda message: message.text == "/stop")
@@ -864,11 +896,7 @@ def send_creator_branding_banner(chat_id):
 
 # Admin functions
 def is_admin(user_id):
-    raw_admins = get_bot_setting_from_creator(BOT_ID, 'admin_ids', '')
-    if raw_admins:
-        admin_ids = [int(x.strip()) for x in raw_admins.split(',') if x.strip().isdigit()]
-        return user_id in admin_ids
-    return False
+    return user_id in ADMIN_IDS
 
 def admin_menu():
     markup = InlineKeyboardMarkup(row_width=1)
