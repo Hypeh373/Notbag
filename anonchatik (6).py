@@ -16,21 +16,78 @@ if BOT_ID is None:
 
 # Путь к БД Creator
 CREATOR_DB_PATH = 'creator_data2.db'
+_CREATOR_BOTS_COLUMNS_CACHE = None
+_CREATOR_MISSING_COLUMN_WARNINGS = set()
+
+
+def _load_creator_bots_columns():
+    """Загружает список колонок таблицы bots из Creator БД и кэширует результат."""
+    global _CREATOR_BOTS_COLUMNS_CACHE
+    if _CREATOR_BOTS_COLUMNS_CACHE is not None:
+        return _CREATOR_BOTS_COLUMNS_CACHE
+    conn = None
+    try:
+        conn = sqlite3.connect(CREATOR_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("PRAGMA table_info(bots)")
+        _CREATOR_BOTS_COLUMNS_CACHE = {row[1] for row in cursor.fetchall()}
+    except Exception as e:
+        print(f"Не удалось получить структуру таблицы bots в Creator БД: {e}")
+        _CREATOR_BOTS_COLUMNS_CACHE = set()
+    finally:
+        if conn:
+            conn.close()
+    return _CREATOR_BOTS_COLUMNS_CACHE
+
+
+def _creator_table_has_column(column_name):
+    """Проверяет наличие нужного столбца в таблице bots."""
+    if not column_name:
+        return False
+    columns = _load_creator_bots_columns()
+    return column_name in columns
+
+
+def _warn_missing_creator_column(column_name):
+    """Логирует предупреждение об отсутствующей колонке, но только один раз."""
+    if column_name in _CREATOR_MISSING_COLUMN_WARNINGS:
+        return
+    print(
+        f"⚠️ Колонка '{column_name}' отсутствует в таблице bots Creator. "
+        f"Используется значение по умолчанию."
+    )
+    _CREATOR_MISSING_COLUMN_WARNINGS.add(column_name)
+
 
 def get_bot_setting_from_creator(bot_id, setting_name, default_value=None):
     """Получает настройку бота из БД Creator"""
+    global _CREATOR_BOTS_COLUMNS_CACHE
+    if not _creator_table_has_column(setting_name):
+        _warn_missing_creator_column(setting_name)
+        return default_value
+    conn = None
     try:
         conn = sqlite3.connect(CREATOR_DB_PATH)
         cursor = conn.cursor()
         cursor.execute(f"SELECT {setting_name} FROM bots WHERE id = ?", (bot_id,))
         result = cursor.fetchone()
-        conn.close()
         if result and result[0] is not None:
             return result[0]
+        return default_value
+    except sqlite3.OperationalError as e:
+        if "no such column" in str(e).lower():
+            # Таблица изменилась после кэширования — сбросим кэш и вернём default.
+            _CREATOR_BOTS_COLUMNS_CACHE = None
+            _warn_missing_creator_column(setting_name)
+            return default_value
+        print(f"Ошибка получения настройки {setting_name}: {e}")
         return default_value
     except Exception as e:
         print(f"Ошибка получения настройки {setting_name}: {e}")
         return default_value
+    finally:
+        if conn:
+            conn.close()
 
 # Загружаем настройки из Creator БД
 TOKEN = get_bot_setting_from_creator(BOT_ID, 'bot_token', '')
@@ -392,6 +449,13 @@ def is_control_command(text: str) -> bool:
     if lowered.startswith("rassilka"):
         return True
     return False
+
+
+def _is_regular_incoming_message(message):
+    text = getattr(message, "text", None)
+    if text and is_control_command(text):
+        return False
+    return True
 
 
 def show_main_buttons(chat_id, prompt_text="Выберите действие:"):
@@ -829,7 +893,10 @@ def user_profile(message):
         ask_gender(user_id)  # Попросим выбрать пол, если этого ещё не сделали.
 
 # Обработка сообщений (пересылка)
-@bot.message_handler(content_types=['text', 'photo', 'video', 'audio', 'voice', 'document', 'sticker'])
+@bot.message_handler(
+    func=_is_regular_incoming_message,
+    content_types=['text', 'photo', 'video', 'audio', 'voice', 'document', 'sticker']
+)
 def forward_message(message):
     user_id = message.chat.id
     ensure_user_loaded(user_id)
