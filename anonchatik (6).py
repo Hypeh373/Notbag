@@ -367,7 +367,34 @@ def callback_query(call):
         show_premium_settings(user_id)
 
 # Основные кнопки (Начать поиск)
-def show_main_buttons(chat_id):
+MENU_BUTTON_TEXTS = {
+    "Начать поиск 🔍",
+    "Личный кабинет 👤",
+    "Премиум поиск 👑",
+    "⚙️ Админка",
+    "❌ Остановить поиск собеседника",
+}
+
+
+def is_control_command(text: str) -> bool:
+    if not text:
+        return False
+    normalized = text.strip()
+    if not normalized:
+        return False
+    lowered = normalized.lower()
+    if normalized in MENU_BUTTON_TEXTS:
+        return True
+    if normalized.startswith("/"):
+        return True
+    if lowered == "alluser":
+        return True
+    if lowered.startswith("rassilka"):
+        return True
+    return False
+
+
+def show_main_buttons(chat_id, prompt_text="Выберите действие:"):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
     search_button = KeyboardButton("Начать поиск 🔍")
     profile_button = KeyboardButton("Личный кабинет 👤")
@@ -376,7 +403,7 @@ def show_main_buttons(chat_id):
     markup.add(profile_button, premium_button)
     if is_admin(chat_id):
         markup.add(KeyboardButton("⚙️ Админка"))
-    bot.send_message(chat_id, "Выберите действие:", reply_markup=markup)
+    bot.send_message(chat_id, prompt_text, reply_markup=markup)
 
 # Admin state handling
 @bot.message_handler(func=lambda m: m.from_user.id in user_states)
@@ -809,13 +836,22 @@ def forward_message(message):
     if not is_user_subscribed(user_id):
         return
 
+    if user_id in user_states:
+        # Админ выполняет действие, не мешаем обработчикам состояний
+        return
+
+    message_text = (message.text or "").strip()
+    if message_text and is_control_command(message_text):
+        # Команда уже будет обработана соответствующим хэндлером
+        return
+
     if user_id in chat_partners:
         partner_id = chat_partners[user_id]
 
         # Пересылаем сообщение собеседнику (анонимно, без показа username)
         bot.copy_message(partner_id, user_id, message.message_id)
     else:
-        bot.send_message(user_id, "У вас сейчас нет собеседника. Нажмите 'Начать поиск 🔍', чтобы найти.")
+        show_main_buttons(user_id, "У вас сейчас нет собеседника. Нажмите 'Начать поиск 🔍', чтобы найти.")
 
 # Функция для загрузки данных пользователя из базы данных в user_data
 def load_user_data():
