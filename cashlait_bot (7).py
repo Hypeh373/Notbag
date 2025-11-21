@@ -1,4 +1,4 @@
-﻿#!/usr/bin/env python3
+#!/usr/bin/env python3
 """
 CashLait task bot.
 
@@ -53,6 +53,7 @@ LOG_FILE_PATH = os.getenv(
 DEFAULT_SETTINGS: Dict[str, str] = {
     "currency_symbol": "USDT",
     "task_reward": "1.0",
+    "task_price_per_completion": "1.0",
     "min_withdraw": "3.0",
     "flyer_api_key": "",
     "flyer_task_limit": "5",
@@ -78,9 +79,12 @@ DEFAULT_SETTINGS: Dict[str, str] = {
 }
 
 ADMIN_SETTING_FIELDS: Dict[str, Tuple[str, str]] = {
-    "task_reward": ("Награда за задание (USDT)", "decimal"),
+    "task_reward": ("Награда исполнителю (USDT)", "decimal"),
+    "task_price_per_completion": ("Стоимость для рекламодателя (USDT)", "decimal"),
     "min_withdraw": ("Минимальный вывод (USDT)", "decimal"),
     "currency_symbol": ("Символ валюты", "text"),
+    "ref_percent_level1": ("Процент 1 уровня (%)", "decimal"),
+    "ref_percent_level2": ("Процент 2 уровня (%)", "decimal"),
     # "asset_rate" убран - курс получается автоматически через Crypto Pay API
 }
 
@@ -1353,6 +1357,21 @@ def get_task_reward_amount() -> Decimal:
     return dec(value or DEFAULT_SETTINGS.get("task_reward", "1.0"), DEFAULT_SETTINGS.get("task_reward", "1.0"))
 
 
+def get_task_price_amount() -> Decimal:
+    """
+    Возвращает стоимость для рекламодателя за одно выполнение.
+    Основной источник — task_price_per_completion, с fallback к устаревшему ключу
+    cashlait_task_price и, при необходимости, к текущей награде исполнителю.
+    """
+    default_price = DEFAULT_SETTINGS.get("task_price_per_completion", DEFAULT_SETTINGS.get("task_reward", "1.0"))
+    value = db.get_setting("task_price_per_completion", default_price)
+    if not value:
+        value = db.get_setting("cashlait_task_price", default_price)
+    if not value:
+        value = db.get_setting("task_reward", default_price)
+    return dec(value or default_price, DEFAULT_SETTINGS.get("task_reward", "1.0"))
+
+
 def build_main_keyboard(user_id: Optional[int] = None) -> types.ReplyKeyboardMarkup:
     kb = types.ReplyKeyboardMarkup(resize_keyboard=True, row_width=2)
     kb.row(types.KeyboardButton(get_menu_button_text("menu_btn_cabinet")))
@@ -1496,7 +1515,7 @@ def get_or_refresh_tasks(user: sqlite3.Row, context: str, *, force: bool = False
         return cached
 
     tasks: List[Dict[str, Any]] = []
-    reward_per_task = dec(db.get_setting("task_reward", "1"))
+    reward_per_task = get_task_reward_amount()
     limit = max(1, int(db.get_setting("flyer_task_limit", "5") or 5))
 
     language_code = None
@@ -1542,7 +1561,7 @@ def get_or_refresh_tasks(user: sqlite3.Row, context: str, *, force: bool = False
         custom_signature = f"custom:{placement}:{row['id']}"
         if is_already_completed(custom_signature):
             continue
-        custom_reward = dec(row["reward"], str(reward_per_task))
+        custom_reward = dec(row["reward"], f"{reward_per_task}")
         tasks.append(
             {
                 "signature": custom_signature,
@@ -1797,9 +1816,10 @@ def send_flyer_logs(chat_id: int) -> None:
 
 def admin_menu_markup() -> types.InlineKeyboardMarkup:
     kb = types.InlineKeyboardMarkup(row_width=2)
-    # Кнопка быстрого изменения награды
-    kb.add(types.InlineKeyboardButton("💵 Изменить награду за задание", callback_data="admin:set:task_reward"))
-    
+    kb.add(
+        types.InlineKeyboardButton("💵 Награда исполнителю", callback_data="admin:set:task_reward"),
+        types.InlineKeyboardButton("💰 Цена для рекламодателя", callback_data="admin:set:task_price_per_completion"),
+    )
     kb.add(
         types.InlineKeyboardButton("⚙️ Настройки", callback_data="admin:settings"),
         types.InlineKeyboardButton("✈️ Flyer", callback_data="admin:flyer"),
@@ -1925,9 +1945,12 @@ def show_custom_tasks_menu(call: types.CallbackQuery, placement: str) -> None:
     if not rows:
         lines.append("Пока нет собственных заданий.")
     else:
+        default_reward = get_task_reward_amount()
+        sym = currency_symbol()
         for row in rows:
-            reward = row["reward"] or db.get_setting("task_reward", "1")
-            lines.append(f"#{row['id']} — {row['title']} ({reward} {currency_symbol()})")
+            raw_reward = row_get(row, "reward")
+            reward_value = default_reward if raw_reward in (None, "") else dec(raw_reward, f"{default_reward}")
+            lines.append(f"#{row['id']} — {row['title']} ({format_amount(reward_value, sym)})")
     kb = types.InlineKeyboardMarkup(row_width=2)
     kb.add(
         types.InlineKeyboardButton("➕ Добавить", callback_data=f"admin:customadd:{placement}"),
@@ -2080,7 +2103,7 @@ def send_referrals_section(user: sqlite3.Row, chat_id: int) -> None:
 
 def send_promotion_section(user: sqlite3.Row, chat_id: int) -> None:
     promo_balance = dec(row_get(user, "promo_balance", "0"), "0")
-    task_price = get_task_reward_amount()
+    task_price = get_task_price_amount()
     min_completions = int(db.get_setting("cashlait_min_completions", "10") or 10)
     
     # Рассчитываем, на сколько выполнений хватит баланса
@@ -2333,7 +2356,7 @@ def process_promo_create_task(message: types.Message, user: sqlite3.Row) -> None
         update_prompt("❌ Создание задания отменено.")
         return
 
-    task_price = get_task_reward_amount()
+    task_price = get_task_price_amount()
     min_completions = int(db.get_setting("cashlait_min_completions", "10") or 10)
 
     if step == "completions":
@@ -3214,7 +3237,7 @@ def callback_promo_actions(call: types.CallbackQuery) -> None:
     
     if action == "create":
         # Получаем настройки
-        task_price = get_task_reward_amount()
+        task_price = get_task_price_amount()
         min_completions = int(db.get_setting("cashlait_min_completions", "10") or 10)
         
         text = (

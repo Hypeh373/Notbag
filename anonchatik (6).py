@@ -262,6 +262,11 @@ def callback_query(call):
     user_id = call.from_user.id
     ensure_user_loaded(user_id)
 
+    admin_callbacks = {"broadcast", "ban_menu", "ban_add", "ban_remove", "ban_list", "admin_back", "stats"}
+    if call.data in admin_callbacks:
+        if handle_admin_callback(call):
+            return
+
     # Ответ на проверку подписки
     if call.data == "check_subscription":
         if check_subscription(user_id):
@@ -320,14 +325,13 @@ def callback_query(call):
 # Основные кнопки (Начать поиск)
 def show_main_buttons(chat_id):
     markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(KeyboardButton("/next"), KeyboardButton("/stop"))
+    search_button = KeyboardButton("Начать поиск 🔍")
+    profile_button = KeyboardButton("Личный кабинет 👤")
+    premium_button = KeyboardButton("Премиум поиск 👑")
+    markup.add(search_button)
+    markup.add(profile_button, premium_button)
     if is_admin(chat_id):
         markup.add(KeyboardButton("⚙️ Админка"))
-    profile_button = KeyboardButton("Личный кабинет 👤")
-    markup.add(profile_button)
-    search_button = KeyboardButton("Начать поиск 🔍")
-    premium_button = KeyboardButton("Премиум поиск 👑")
-    markup.add(search_button, premium_button)
     bot.send_message(chat_id, "Выберите действие:", reply_markup=markup)
 
 # Admin state handling
@@ -618,17 +622,13 @@ def find_partner_for_user(user_id):
 
 
 def send_chat_controls(chat_id):
-    markup = ReplyKeyboardMarkup(resize_keyboard=True)
-    markup.add(KeyboardButton("/next"), KeyboardButton("/stop"))
-    if is_admin(chat_id):
-        markup.add(KeyboardButton("⚙️ Админка"))
     bot.send_message(
         chat_id,
-        "🔥Собеседник найден! Начинайте общение.\n"
-        "/next - Найти другого собеседника\n"
-        "/stop - Закончить диалог\n"
-        "/start - Перезапустить бота!",
-        reply_markup=markup
+        "🔥 Собеседник найден! Начинайте общение.\n"
+        "/next — найти другого собеседника\n"
+        "/stop — закончить диалог\n"
+        "/start — вернуться в меню",
+        reply_markup=ReplyKeyboardRemove()
     )
 
 
@@ -885,6 +885,103 @@ def ban_menu():
     markup.add(InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
     return markup
 
+
+def handle_admin_callback(call):
+    user_id = call.from_user.id
+    if not is_admin(user_id):
+        bot.answer_callback_query(call.id, "Нет доступа", show_alert=True)
+        return True
+    data = call.data
+
+    def edit_panel(text, markup):
+        try:
+            bot.edit_message_text(text, call.message.chat.id, call.message.message_id, reply_markup=markup)
+        except Exception:
+            bot.send_message(call.message.chat.id, text, reply_markup=markup)
+
+    if data == "broadcast":
+        user_states[user_id] = 'waiting_broadcast'
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            user_id,
+            "📣 Введите текст рассылки. Сообщение получат все активные пользователи.",
+        )
+        return True
+
+    if data == "ban_menu":
+        bot.answer_callback_query(call.id)
+        edit_panel("🚫 Управление банами:", ban_menu())
+        return True
+
+    if data == "ban_add":
+        user_states[user_id] = 'waiting_ban'
+        bot.answer_callback_query(call.id)
+        bot.send_message(
+            user_id,
+            "Введите ID пользователя и причину бана через пробел.\nНапример: <code>123456789 спам</code>",
+            parse_mode="HTML",
+        )
+        return True
+
+    if data == "ban_remove":
+        user_states[user_id] = 'waiting_unban'
+        bot.answer_callback_query(call.id)
+        bot.send_message(user_id, "Введите ID пользователя для разблокировки.")
+        return True
+
+    if data == "ban_list":
+        conn = sqlite3.connect(USER_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT user_id, reason, created_at FROM bans ORDER BY created_at DESC LIMIT 20"
+        )
+        rows = cursor.fetchall()
+        conn.close()
+        if not rows:
+            text = "🚫 Список банов пуст."
+        else:
+            lines = ["🚫 Активные баны:", ""]
+            for banned_id, reason, created_at in rows:
+                reason_text = escape(reason or "Без причины")
+                timestamp = escape(created_at or "")
+                lines.append(f"<b>{banned_id}</b> — {reason_text}")
+                if timestamp:
+                    lines.append(f"└ {timestamp}")
+        bot.answer_callback_query(call.id)
+        bot.send_message(user_id, "\n".join(lines) if rows else text, parse_mode="HTML")
+        return True
+
+    if data == "stats":
+        conn = sqlite3.connect(USER_DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM users")
+        total_users = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM users WHERE premium = 1")
+        premium_users = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM users WHERE banned = 1")
+        banned_users = cursor.fetchone()[0]
+        conn.close()
+        waiting = len(waiting_users)
+        active_pairs = len(chat_partners) // 2
+        stats_text = (
+            "📊 Статистика бота:\n"
+            f"• Всего пользователей: {total_users}\n"
+            f"• Премиум подписчиков: {premium_users}\n"
+            f"• Заблокировано: {banned_users}\n"
+            f"• В очереди: {waiting}\n"
+            f"• Активных диалогов: {active_pairs}"
+        )
+        bot.answer_callback_query(call.id)
+        bot.send_message(user_id, stats_text)
+        return True
+
+    if data == "admin_back":
+        bot.answer_callback_query(call.id)
+        edit_panel("⚙️ Админ панель:", admin_menu())
+        return True
+
+    return False
+
 @bot.message_handler(commands=['start'])
 def start(message):
     user_id = message.chat.id
@@ -900,8 +997,7 @@ def start(message):
 
     if not user_data[user_id]["gender"]:
         ask_gender(user_id)
-    else:
-        show_main_buttons(user_id)
+    show_main_buttons(user_id)
 
 # Admin panel handler
 @bot.message_handler(func=lambda message: message.text == "⚙️ Админка")
