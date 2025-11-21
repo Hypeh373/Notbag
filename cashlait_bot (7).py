@@ -22,6 +22,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from html import escape
 from io import BytesIO
 from typing import Any, Dict, Iterable, List, Optional, Tuple
 
@@ -34,7 +35,14 @@ from telebot.apihelper import ApiException
 # ⚠️ ВСТАВЬТЕ ВАШ ТОКЕН БОТА ОТ @BotFather:
 BOT_TOKEN = os.getenv("CASHLAIT_BOT_TOKEN", "8400644706:AAFjCQDxS73hvhizY4f3v94-vlXLkvqGHdQ")  # Например: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
 CONSTRUCTOR_BOT_USERNAME = os.getenv("CONSTRUCTOR_BOT_USERNAME", "MinxoCreate_bot").strip("@ ")
-CONSTRUCTOR_BOT_LINK = f"https://t.me/{CONSTRUCTOR_BOT_USERNAME}"
+CONSTRUCTOR_BOT_LINK = os.getenv("CONSTRUCTOR_BOT_LINK")
+if not CONSTRUCTOR_BOT_LINK:
+    if CONSTRUCTOR_BOT_USERNAME:
+        CONSTRUCTOR_BOT_LINK = f"https://t.me/{CONSTRUCTOR_BOT_USERNAME}"
+    else:
+        CONSTRUCTOR_BOT_LINK = ""
+CREATOR_USERNAME_DEFAULT = f"@{CONSTRUCTOR_BOT_USERNAME}" if CONSTRUCTOR_BOT_USERNAME else "@MinxoCreate_bot"
+CREATOR_CONTACT_LABEL_DEFAULT = os.getenv("CONSTRUCTOR_BOT_LABEL", "🤖 Хочу такого же бота") or "🤖 Хочу такого же бота"
 ADMIN_IDS = {
     int(token)
     for token in os.getenv("ADMIN_IDS", "6745031200,7585735331").replace(";", ",").split(",")
@@ -75,7 +83,13 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     "info_help_url": "",
     "info_news_url": "",
     "info_chat_url": "",
-    # "info_copy_bot_url" убрана из настроек - используется константа CONSTRUCTOR_BOT_LINK
+    # Настройки брендинга конструктора
+    "creator_contact_url": CONSTRUCTOR_BOT_LINK,
+    "creator_contact_label": CREATOR_CONTACT_LABEL_DEFAULT,
+    "creator_contact_button_label": "🤖 Хочу такого же бота",
+    "creator_branding_message": "🤖 Бот создан с помощью {label_html}",
+    "creator_branding_enabled": "true",
+    "vip_branding_disabled": "false",
 }
 
 ADMIN_SETTING_FIELDS: Dict[str, Tuple[str, str]] = {
@@ -106,7 +120,7 @@ INFO_LINK_FIELDS: Dict[str, Tuple[str, str]] = {
     "info_help_url": ("Ссылка «Помощь»", "text"),
     "info_news_url": ("Ссылка «Новости»", "text"),
     "info_chat_url": ("Ссылка «Чат»", "text"),
-    # "info_copy_bot_url" убрана - теперь только через константу CONSTRUCTOR_BOT_LINK
+    # Кнопка «Хочу такого же бота» теперь настраивается отдельными параметрами брендинга
 }
 
 RESERVE_SETTING_FIELDS: Dict[str, Tuple[str, str]] = {
@@ -220,6 +234,175 @@ def setting_display(key: str, value: str) -> str:
 def parse_decimal_input(text: str, quant: Decimal = DECIMAL_INPUT_QUANT) -> Decimal:
     value = Decimal(text.replace(",", "."))
     return value.quantize(quant, rounding=ROUND_HALF_UP)
+
+
+_TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled", "y"}
+_VIP_ENV_FLAGS = (
+    "CASHLAIT_VIP_ACTIVE",
+    "EXCHANGE_VIP_ACTIVE",
+    "VIP_ACTIVE",
+    "VIP_MODE",
+    "VIP_BRANDING_DISABLED",
+    "CREATOR_VIP_ACTIVE",
+)
+
+
+def _normalize_creator_link(value: Optional[str]) -> str:
+    if not value:
+        return ""
+    trimmed = str(value).strip()
+    if not trimmed:
+        return ""
+    if trimmed.startswith("@"):
+        username = trimmed.lstrip("@")
+        return f"https://t.me/{username}"
+    return trimmed
+
+
+def _derive_creator_label(raw_label: Optional[str], normalized_link: str) -> str:
+    label = (raw_label or "").strip()
+    if label:
+        return label
+    if normalized_link.startswith("https://t.me/"):
+        username = normalized_link.split("https://t.me/", 1)[1].strip("/")
+        if username:
+            return f"@{username}"
+    return normalized_link or ""
+
+
+def _creator_label_html(label: str, normalized_link: str) -> str:
+    safe_label = escape(label or "")
+    safe_link = escape(normalized_link or "")
+    if safe_label and safe_link:
+        return f"<a href=\"{safe_link}\">{safe_label}</a>"
+    return safe_label or safe_link
+
+
+def _str_to_bool(value: Optional[str], default: bool = False) -> bool:
+    if value is None:
+        return default
+    return value.strip().lower() in _TRUE_VALUES
+
+
+def _env_flag(*names: str) -> Optional[bool]:
+    for name in names:
+        value = os.getenv(name)
+        if value is None:
+            continue
+        return _str_to_bool(value, False)
+    return None
+
+
+def get_creator_contact_url() -> str:
+    env_value = os.getenv("CREATOR_CONTACT_URL")
+    if env_value:
+        return _normalize_creator_link(env_value)
+    setting_value = db.get_setting("creator_contact_url", CONSTRUCTOR_BOT_LINK or "")
+    if setting_value:
+        return _normalize_creator_link(setting_value)
+    return _normalize_creator_link(CONSTRUCTOR_BOT_LINK)
+
+
+def get_creator_contact_label() -> str:
+    env_value = os.getenv("CREATOR_CONTACT_LABEL")
+    if env_value:
+        return env_value.strip()
+    setting_value = db.get_setting("creator_contact_label", CREATOR_CONTACT_LABEL_DEFAULT)
+    if setting_value:
+        return setting_value.strip()
+    return _derive_creator_label("", get_creator_contact_url())
+
+
+def get_creator_button_label() -> str:
+    env_value = os.getenv("CREATOR_CONTACT_BUTTON_LABEL")
+    if env_value:
+        return env_value.strip()
+    setting_value = db.get_setting("creator_contact_button_label", "🤖 Хочу такого же бота")
+    if setting_value:
+        return setting_value.strip()
+    return "🤖 Хочу такого же бота"
+
+
+def is_vip_branding_disabled() -> bool:
+    env_value = _env_flag(*_VIP_ENV_FLAGS)
+    if env_value:
+        return True
+    setting_value = db.get_setting("vip_branding_disabled", "false")
+    return _str_to_bool(setting_value, False)
+
+
+def is_creator_branding_active() -> bool:
+    if is_vip_branding_disabled():
+        return False
+    env_flag = _env_flag("CREATOR_BRANDING_ENABLED", "CREATOR_BRANDING")
+    if env_flag is not None:
+        enabled = env_flag
+    else:
+        enabled = _str_to_bool(db.get_setting("creator_branding_enabled", "true"), True)
+    if not enabled:
+        return False
+    return bool(get_creator_contact_url() or get_creator_contact_label())
+
+
+def render_creator_branding_text() -> Optional[str]:
+    if not is_creator_branding_active():
+        return None
+    template = os.getenv("CREATOR_BRANDING_MESSAGE")
+    if template is None:
+        template = db.get_setting("creator_branding_message", "🤖 Бот создан с помощью {label_html}")
+    template = template.strip()
+    if not template:
+        return None
+    link = get_creator_contact_url()
+    label = get_creator_contact_label() or link
+    label_html = _creator_label_html(label, link)
+    context = {
+        "label": label or "",
+        "label_html": label_html or "",
+        "link": link or "",
+    }
+    try:
+        return template.format(**context)
+    except KeyError:
+        return (
+            template.replace("{label_html}", context["label_html"])
+            .replace("{label}", context["label"])
+            .replace("{link}", context["link"])
+        )
+
+
+def build_creator_branding_button() -> Optional[types.InlineKeyboardButton]:
+    if not is_creator_branding_active():
+        return None
+    link = get_creator_contact_url()
+    if not link:
+        return None
+    text = get_creator_button_label() or get_creator_contact_label()
+    if not text:
+        text = "🤖 Хочу такого же бота"
+    return types.InlineKeyboardButton(text, url=link)
+
+
+def build_creator_branding_markup() -> Optional[types.InlineKeyboardMarkup]:
+    button = build_creator_branding_button()
+    if not button:
+        return None
+    markup = types.InlineKeyboardMarkup(row_width=1)
+    markup.add(button)
+    return markup
+
+
+def send_creator_branding_banner(chat_id: int) -> None:
+    if not is_creator_branding_active():
+        return
+    text = render_creator_branding_text()
+    markup = build_creator_branding_markup()
+    if not text and not markup:
+        return
+    try:
+        bot.send_message(chat_id, text or "", reply_markup=markup, disable_web_page_preview=True)
+    except ApiException:
+        pass
 
 
 def convert_admin_value(value_type: str, raw_text: str) -> Tuple[bool, Optional[str], str]:
@@ -1095,6 +1278,12 @@ def apply_env_overrides() -> None:
         "currency_symbol": os.getenv("CASHLAIT_CURRENCY_SYMBOL"),
         "flyer_task_limit": os.getenv("CASHLAIT_FLYER_TASK_LIMIT"),
         "welcome_text": os.getenv("CASHLAIT_WELCOME_TEXT"),
+        "creator_contact_url": os.getenv("CREATOR_CONTACT_URL"),
+        "creator_contact_label": os.getenv("CREATOR_CONTACT_LABEL"),
+        "creator_contact_button_label": os.getenv("CREATOR_CONTACT_BUTTON_LABEL"),
+        "creator_branding_message": os.getenv("CREATOR_BRANDING_MESSAGE"),
+        "creator_branding_enabled": os.getenv("CREATOR_BRANDING_ENABLED"),
+        "vip_branding_disabled": os.getenv("VIP_BRANDING_DISABLED"),
     }
     for key, value in overrides.items():
         if value is None:
@@ -1789,11 +1978,13 @@ def send_main_screen(chat_id: int, user_id: Optional[int] = None) -> None:
     try:
         text = db.get_setting("welcome_text", DEFAULT_SETTINGS["welcome_text"])
         bot.send_message(chat_id, text, reply_markup=build_main_keyboard(user_id))
+        send_creator_branding_banner(chat_id)
         logger.debug(f"Главный экран отправлен в чат {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке главного экрана в чат {chat_id}: {e}", exc_info=True)
         try:
             bot.send_message(chat_id, "Добро пожаловать! Используйте меню ниже.", reply_markup=build_main_keyboard(user_id))
+            send_creator_branding_banner(chat_id)
         except:
             pass
 
@@ -2180,9 +2371,9 @@ def send_about_section(chat_id: int) -> None:
     add_info_button("❓ Помощь", "info_help_url", "help")
     add_info_button("📣 Новости", "info_news_url", "news")
     add_info_button("💬 Чат", "info_chat_url", "chat")
-    # Кнопка "Хочу такого же бота" - берется из константы CONSTRUCTOR_BOT_LINK, а не из настроек
-    if CONSTRUCTOR_BOT_LINK:
-        markup.add(types.InlineKeyboardButton("🤖 Хочу такого же бота", url=CONSTRUCTOR_BOT_LINK))
+    brand_button = build_creator_branding_button()
+    if brand_button:
+        markup.add(brand_button)
     bot.send_message(chat_id, text, reply_markup=markup)
 
 
