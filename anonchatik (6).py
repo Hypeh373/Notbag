@@ -8,6 +8,9 @@ import os
 from datetime import datetime
 from html import escape
 
+# Укажите @username конструктора; при желании можно переопределить через переменную окружения CREATOR_USERNAME.
+CREATOR_USERNAME = os.getenv('CREATOR_USERNAME', '@GrillCreate_bot').strip() or '@GrillCreate_bot'
+
 # BOT_ID передается как аргумент командной строки
 BOT_ID = int(sys.argv[1]) if len(sys.argv) > 1 else None
 if BOT_ID is None:
@@ -164,11 +167,24 @@ CHANNEL_USERNAME = CHANNEL_ID[1:] if CHANNEL_ID.startswith('@') else CHANNEL_ID
 SUBSCRIPTION_REQUIRED = bool(CHANNEL_ID)
 DEFAULT_SEARCH_GENDER = "Любой"
 
-# Branding settings from env (for updated version)
-CREATOR_BRANDING_ENABLED = os.getenv('CREATOR_BRANDING_ENABLED', 'false').lower() in ('true', '1', 'yes')
-CREATOR_CONTACT_URL = os.getenv('CREATOR_CONTACT_URL', get_bot_setting_from_creator(BOT_ID, 'constructor_bot_link', 'https://t.me/GrillCreate_bot'))
-CREATOR_CONTACT_LABEL = os.getenv('CREATOR_CONTACT_LABEL', get_bot_setting_from_creator(BOT_ID, 'constructor_bot_link_text', '🤖 Хочу такого же бота'))
-CREATOR_BRANDING_MESSAGE = os.getenv('CREATOR_BRANDING_MESSAGE', '🤖 Бот создан с помощью {label_html}')
+def _resolve_creator_username() -> str:
+    """Возвращает @username конструктора в нормализованном виде."""
+    username = CREATOR_USERNAME.strip()
+    if not username:
+        return ""
+    username = username.replace(" ", "")
+    if not username:
+        return ""
+    if not username.startswith('@'):
+        username = f"@{username.lstrip('@')}"
+    return username
+
+
+def _build_creator_branding_text() -> str:
+    handle = _resolve_creator_username()
+    if not handle:
+        return ""
+    return f"Создан с помощью {handle}"
 
 if not TOKEN:
     print(f"ОШИБКА: Токен бота #{BOT_ID} не найден в БД Creator!")
@@ -949,63 +965,14 @@ def load_user_data():
 
     conn.close()
 
-# Branding functions
-def _normalize_creator_link(value: str) -> str:
-    if not value:
-        return ""
-    trimmed = value.strip()
-    if not trimmed:
-        return ""
-    if trimmed.startswith("@"):
-        return f"https://t.me/{trimmed.lstrip('@')}"
-    return trimmed
-
-def _derive_creator_label(raw_label: str) -> str:
-    candidate = (raw_label or "").strip()
-    if candidate:
-        return candidate
-    normalized_link = _normalize_creator_link(CREATOR_CONTACT_URL)
-    if normalized_link.startswith("https://t.me/"):
-        username = normalized_link.split("https://t.me/", 1)[1].split("/", 1)[0]
-        if username:
-            return f"@{username}"
-    return normalized_link or ""
-
-def _creator_label_html(label: str, link: str) -> str:
-    display = label or _derive_creator_label("")
-    if not display:
-        return ""
-    safe_display = escape(display)
-    normalized_link = _normalize_creator_link(link)
-    if normalized_link:
-        safe_link = escape(normalized_link)
-        return f"<a href=\"{safe_link}\">{safe_display}</a>"
-    return safe_display
-
-def is_creator_branding_active() -> bool:
-    return CREATOR_BRANDING_ENABLED and bool(CREATOR_CONTACT_URL or CREATOR_CONTACT_LABEL)
-
-def build_creator_branding_markup():
-    if not CREATOR_CONTACT_URL:
-        return None
-    markup = InlineKeyboardMarkup()
-    markup.add(InlineKeyboardButton(CREATOR_CONTACT_LABEL, url=CREATOR_CONTACT_URL))
-    return markup
-
-def render_creator_branding_text():
-    if not is_creator_branding_active():
-        return None
-    if not CREATOR_BRANDING_MESSAGE:
-        return None
-    label_value = CREATOR_CONTACT_LABEL or CREATOR_CONTACT_URL
-    label_html = _creator_label_html(label_value, CREATOR_CONTACT_URL)
-    return CREATOR_BRANDING_MESSAGE.format(link=CREATOR_CONTACT_URL, label=label_value, label_html=label_html)
-
 def send_creator_branding_banner(chat_id):
-    text = render_creator_branding_text()
-    markup = build_creator_branding_markup()
+    ensure_user_loaded(chat_id)
+    user_info = user_data.get(chat_id, {})
+    if user_info.get("premium"):
+        return
+    text = _build_creator_branding_text()
     if text:
-        bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=markup)
+        bot.send_message(chat_id, text)
 
 # Admin functions
 def is_admin(user_id):
