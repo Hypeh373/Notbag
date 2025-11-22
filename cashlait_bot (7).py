@@ -4174,6 +4174,9 @@ def start_reserve_cashout(call: types.CallbackQuery) -> None:
 @bot.message_handler(commands=["start"])
 def command_start(message: types.Message) -> None:
     try:
+        if message.from_user.id in user_states:
+             user_states.pop(message.from_user.id, None)
+
         logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
         ref_id = parse_start_payload(message.text or "")
         user = ensure_member(message, ref_id)

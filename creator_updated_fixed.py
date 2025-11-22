@@ -4626,6 +4626,10 @@ if __name__ == '__main__':
 
     @bot.message_handler(commands=['start'])
     def handle_start(message):
+        # Очищаем состояние, чтобы пользователь не застревал
+        if message.from_user.id in user_states:
+            del user_states[message.from_user.id]
+            
         get_user(message.from_user.id, message.from_user.username)
         welcome = get_custom_text('creator_welcome')
         wm_enabled_raw = get_setting('creator_watermark_enabled')
