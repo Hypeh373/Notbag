@@ -5462,27 +5462,27 @@ if __name__ == '__main__':
                     )
                     return
                     
-                    elif action == 'check':
-                        invoice_id_to_check = int(parts[3])
-                        bot.answer_callback_query(call.id, "Проверяю статус платежа...")
-                        
-                        async def check_creator_invoice():
-                            local_crypto = get_crypto_client()
-                            if not local_crypto:
-                                bot.answer_callback_query(call.id, "❌ Crypto Pay недоступен сейчас.", show_alert=True)
-                                return
-                            invoices = await local_crypto.get_invoices(invoice_ids=str(invoice_id_to_check))
-                            if invoices and invoices[0].status == 'paid':
-                                # Создаем бота Креатор
-                                creator_bot_id = create_bot_in_db(user_id, 'creator')
-                                db_execute("UPDATE crypto_payments SET status = 'paid' WHERE invoice_id = ?", (invoice_id_to_check,), commit=True)
-                                bot.edit_message_text(f"✅ Оплата прошла успешно! Бот Креатор #{creator_bot_id} создан!\n\nОжидайте выдачи бота! Вам напишет админ!", user_id, call.message.message_id,
-                                                      reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ В меню ботов", callback_data="back_to_bots_list")))
-                            else:
-                                bot.answer_callback_query(call.id, "❌ Платеж еще не прошел или счет истек.", show_alert=True)
-                        
-                        run_async_task(check_creator_invoice())
-                        return
+                elif action == 'check':
+                    invoice_id_to_check = int(parts[3])
+                    bot.answer_callback_query(call.id, "Проверяю статус платежа...")
+                    
+                    async def check_creator_invoice():
+                        local_crypto = get_crypto_client()
+                        if not local_crypto:
+                            bot.answer_callback_query(call.id, "❌ Crypto Pay недоступен сейчас.", show_alert=True)
+                            return
+                        invoices = await local_crypto.get_invoices(invoice_ids=str(invoice_id_to_check))
+                        if invoices and invoices[0].status == 'paid':
+                            # Создаем бота Креатор
+                            creator_bot_id = create_bot_in_db(user_id, 'creator')
+                            db_execute("UPDATE crypto_payments SET status = 'paid' WHERE invoice_id = ?", (invoice_id_to_check,), commit=True)
+                            bot.edit_message_text(f"✅ Оплата прошла успешно! Бот Креатор #{creator_bot_id} создан!\n\nОжидайте выдачи бота! Вам напишет админ!", user_id, call.message.message_id,
+                                                  reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ В меню ботов", callback_data="back_to_bots_list")))
+                        else:
+                            bot.answer_callback_query(call.id, "❌ Платеж еще не прошел или счет истек.", show_alert=True)
+                    
+                    run_async_task(check_creator_invoice())
+                    return
             
             if call.data == "creator_withdraw_start":
                 bot.answer_callback_query(call.id)

@@ -1,0 +1,9 @@
+# Зависимости для creator_updated_fixed.py
+
+# Основные зависимости
+pyTelegramBotAPI>=4.0.0
+psutil>=5.8.0
+aiocryptopay>=1.0.0
+
+# Опциональные зависимости
+# flyerapi  # Раскомментируйте, если нужна поддержка Flyer API
