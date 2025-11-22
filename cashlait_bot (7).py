@@ -32,17 +32,89 @@ from telebot import types
 from telebot.apihelper import ApiException
 
 
+DEFAULT_CONSTRUCTOR_USERNAME = "MinxoCreate_bot"
+DEFAULT_CREATOR_BRANDING_LINK = f"https://t.me/{DEFAULT_CONSTRUCTOR_USERNAME}"
+
+
+def _extract_username_from_link(value: Optional[str]) -> str:
+    """Возвращает @username, если в ссылке или строке содержится Telegram-юзер."""
+    if not value:
+        return ""
+    trimmed = str(value).strip()
+    if not trimmed:
+        return ""
+    trimmed = trimmed.rstrip("/")
+    lower_value = trimmed.lower()
+    prefixes = (
+        "https://t.me/",
+        "http://t.me/",
+        "https://telegram.me/",
+        "http://telegram.me/",
+        "t.me/",
+        "telegram.me/",
+    )
+    username = ""
+    for prefix in prefixes:
+        if lower_value.startswith(prefix):
+            username = trimmed[len(prefix):]
+            break
+    else:
+        if trimmed.startswith("@"):
+            username = trimmed.lstrip("@")
+        else:
+            return ""
+    username = username.split("/", 1)[0]
+    username = username.split("?", 1)[0]
+    username = username.strip().lstrip("@")
+    if not username:
+        return ""
+    return f"@{username}"
+
+
+def _build_creator_link(candidate: Optional[str], fallback_username: str) -> str:
+    """Превращает произвольную строку/юзер в https://t.me/ ссылку."""
+    candidate_clean = (candidate or "").strip()
+    fallback_clean = (fallback_username or DEFAULT_CONSTRUCTOR_USERNAME).strip().lstrip("@ ")
+    if candidate_clean:
+        handle = _extract_username_from_link(candidate_clean)
+        if handle:
+            return f"https://t.me/{handle.lstrip('@')}"
+        if candidate_clean.lower().startswith("http://"):
+            return "https://" + candidate_clean[7:]
+        return candidate_clean
+    fallback_target = fallback_clean or DEFAULT_CONSTRUCTOR_USERNAME
+    return f"https://t.me/{fallback_target}"
+
+
 # ⚠️ ВСТАВЬТЕ ВАШ ТОКЕН БОТА ОТ @BotFather:
 BOT_TOKEN = os.getenv("CASHLAIT_BOT_TOKEN", "8400644706:AAFjCQDxS73hvhizY4f3v94-vlXLkvqGHdQ")  # Например: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-CONSTRUCTOR_BOT_USERNAME = os.getenv("CONSTRUCTOR_BOT_USERNAME", "MinxoCreate_bot").strip("@ ")
-CONSTRUCTOR_BOT_LINK = os.getenv("CONSTRUCTOR_BOT_LINK")
-if not CONSTRUCTOR_BOT_LINK:
-    if CONSTRUCTOR_BOT_USERNAME:
-        CONSTRUCTOR_BOT_LINK = f"https://t.me/{CONSTRUCTOR_BOT_USERNAME}"
-    else:
-        CONSTRUCTOR_BOT_LINK = ""
-CREATOR_USERNAME_DEFAULT = f"@{CONSTRUCTOR_BOT_USERNAME}" if CONSTRUCTOR_BOT_USERNAME else "@MinxoCreate_bot"
-CREATOR_CONTACT_LABEL_DEFAULT = os.getenv("CONSTRUCTOR_BOT_LABEL", "🤖 Хочу такого же бота") or "🤖 Хочу такого же бота"
+raw_constructor_username = (os.getenv("CONSTRUCTOR_BOT_USERNAME") or "").strip()
+CONSTRUCTOR_BOT_USERNAME = raw_constructor_username.lstrip("@ ")
+creator_link_candidate = os.getenv("CREATOR_BRANDING_LINK")
+if not creator_link_candidate:
+    creator_link_candidate = os.getenv("CONSTRUCTOR_BOT_LINK")
+if not creator_link_candidate and CONSTRUCTOR_BOT_USERNAME:
+    creator_link_candidate = f"https://t.me/{CONSTRUCTOR_BOT_USERNAME}"
+if not creator_link_candidate:
+    creator_link_candidate = DEFAULT_CREATOR_BRANDING_LINK
+fallback_username = CONSTRUCTOR_BOT_USERNAME or DEFAULT_CONSTRUCTOR_USERNAME
+CREATOR_BRANDING_LINK = _build_creator_link(creator_link_candidate, fallback_username)
+CONSTRUCTOR_BOT_LINK = CREATOR_BRANDING_LINK
+derived_handle = _extract_username_from_link(CONSTRUCTOR_BOT_LINK)
+if derived_handle:
+    CONSTRUCTOR_BOT_USERNAME = derived_handle.lstrip("@")
+if not CONSTRUCTOR_BOT_USERNAME:
+    CONSTRUCTOR_BOT_USERNAME = DEFAULT_CONSTRUCTOR_USERNAME
+CREATOR_USERNAME_DEFAULT = f"@{CONSTRUCTOR_BOT_USERNAME}"
+raw_creator_label = os.getenv("CONSTRUCTOR_BOT_LABEL")
+if raw_creator_label:
+    CREATOR_CONTACT_LABEL_DEFAULT = raw_creator_label.strip()
+else:
+    CREATOR_CONTACT_LABEL_DEFAULT = CREATOR_USERNAME_DEFAULT
+LEGACY_CREATOR_LABELS = {
+    "🤖 Хочу такого же бота",
+    "Хочу такого же бота",
+}
 ADMIN_IDS = {
     int(token)
     for token in os.getenv("ADMIN_IDS", "6745031200,7585735331").replace(";", ",").split(",")
@@ -307,10 +379,11 @@ def get_creator_contact_label() -> str:
     env_value = os.getenv("CREATOR_CONTACT_LABEL")
     if env_value:
         return env_value.strip()
-    setting_value = db.get_setting("creator_contact_label", CREATOR_CONTACT_LABEL_DEFAULT)
-    if setting_value:
-        return setting_value.strip()
-    return _derive_creator_label("", get_creator_contact_url())
+    fallback_label = _derive_creator_label("", get_creator_contact_url()) or CREATOR_USERNAME_DEFAULT
+    setting_value = (db.get_setting("creator_contact_label", CREATOR_CONTACT_LABEL_DEFAULT) or "").strip()
+    if not setting_value or setting_value in LEGACY_CREATOR_LABELS:
+        return fallback_label
+    return setting_value
 
 
 def get_creator_button_label() -> str:
@@ -1295,6 +1368,18 @@ def apply_env_overrides() -> None:
 
 apply_env_overrides()
 
+
+def ensure_creator_label_matches_link() -> None:
+    stored_label = (db.get_setting("creator_contact_label", "") or "").strip()
+    if stored_label and stored_label not in LEGACY_CREATOR_LABELS:
+        return
+    fallback_label = _derive_creator_label("", get_creator_contact_url())
+    if fallback_label and fallback_label != stored_label:
+        db.set_setting("creator_contact_label", fallback_label)
+
+
+ensure_creator_label_matches_link()
+
 if BOT_TOKEN in {"", "PASTE_YOUR_TOKEN", "ВАШ_ТОКЕН_ОТ_BOTFATHER_ЗДЕСЬ"}:
     raise RuntimeError("⚠️ УКАЖИТЕ ТОКЕН БОТА! Откройте cashlait_bot.py и замените BOT_TOKEN на ваш токен от @BotFather")
 
@@ -1975,16 +2060,19 @@ def process_subscription_watchlist(user_id: Optional[int] = None) -> None:
 
 
 def send_main_screen(chat_id: int, user_id: Optional[int] = None) -> None:
+    branding_enabled = is_creator_branding_active()
     try:
         text = db.get_setting("welcome_text", DEFAULT_SETTINGS["welcome_text"])
         bot.send_message(chat_id, text, reply_markup=build_main_keyboard(user_id))
-        send_creator_branding_banner(chat_id)
+        if branding_enabled:
+            send_creator_branding_banner(chat_id)
         logger.debug(f"Главный экран отправлен в чат {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке главного экрана в чат {chat_id}: {e}", exc_info=True)
         try:
             bot.send_message(chat_id, "Добро пожаловать! Используйте меню ниже.", reply_markup=build_main_keyboard(user_id))
-            send_creator_branding_banner(chat_id)
+            if branding_enabled:
+                send_creator_branding_banner(chat_id)
         except:
             pass
 
