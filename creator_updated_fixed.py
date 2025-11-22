@@ -4389,6 +4389,7 @@ def handle_admin_callbacks(call):
                     'call_id': call.id,
                     'callback_to_return': 'admin_op_manage'
                 })
+                bot.answer_callback_query(call.id)
                 return
             if setting_key and prompt_text:
                 markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_op_manage"))
@@ -4403,7 +4404,9 @@ def handle_admin_callbacks(call):
             msg = bot.edit_message_text(f"📊 Текущий лимит бесплатных ботов: {current_limit}.\n\nВведите новое целое число:", chat_id, call.message.message_id,
                                         reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_op_manage")))
             set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'MAX_BOTS_PER_USER', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+            bot.answer_callback_query(call.id)
             return
+        bot.answer_callback_query(call.id)
         return
 
     elif action == "wd":
@@ -4471,6 +4474,7 @@ def handle_admin_callbacks(call):
         elif wd_action == 'reply':
             msg = bot.send_message(chat_id, f"Введите текст сообщения для пользователя {target_user_id}:", reply_markup=create_cancel_markup())
             set_user_state(user_id, {'action': 'admin_reply_text', 'target_user_id': target_user_id, 'bot_id': None, 'message_id': msg.message_id, 'call_id': call.id})
+            bot.answer_callback_query(call.id)
             return
         call.data = f"admin_wd_view_{wd_id}"; handle_admin_callbacks(call)
 
