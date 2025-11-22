@@ -1847,8 +1847,6 @@ def process_state_input(message):
         except: pass
         if user_id in user_states: del user_states[user_id]
         bot.send_message(user_id, "Действие отменено.", reply_markup=create_main_menu(user_id))
-        try: bot.delete_message(user_id, message.message_id)
-        except: pass
         return
 
     if action == 'admin_set_custom_button_text':
@@ -2864,14 +2862,21 @@ def process_state_input(message):
     if action == 'admin_reply_text':
         target_user_id = state['target_user_id']
         bot_id = state.get('bot_id')
+        
+        text_content = getattr(message, 'text', None)
+        if not text_content:
+            bot.send_message(user_id, "❌ Пожалуйста, отправьте текстовое сообщение.")
+            return
+
         try:
-            reply_text = f"Сообщение от администратора:\n\n{message.text}"
+            reply_text = f"Сообщение от администратора:\n\n{text_content}"
             if bot_id:
-                reply_text = f"Сообщение от администратора по поводу заявки на Flyer для бота #{bot_id}:\n\n{message.text}"
+                reply_text = f"Сообщение от администратора по поводу заявки на Flyer для бота #{bot_id}:\n\n{text_content}"
             bot.send_message(target_user_id, reply_text)
             bot.answer_callback_query(state['call_id'], "✅ Сообщение отправлено!", show_alert=True)
         except Exception as e:
-            bot.answer_callback_query(state['call_id'], f"❌ Ошибка отправки: {e}", show_alert=True)
+            try: bot.answer_callback_query(state['call_id'], f"❌ Ошибка отправки: {e}", show_alert=True)
+            except: pass
         if user_id in user_states: del user_states[user_id]
         return
         
@@ -4207,10 +4212,12 @@ def handle_admin_callbacks(call):
         if wd_action == 'approve':
             db_execute("UPDATE creator_withdrawals SET status = 'approved' WHERE id = ?", (wd_id,), commit=True)
             bot.send_message(target_user_id, f"✅ Ваша заявка на вывод {wd_info['amount']:.2f} ₽ одобрена и будет выплачена в ближайшее время.")
+            bot.edit_message_text(text + "\n\n<b>Статус: ✅ ОДОБРЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML", reply_markup=None)
         elif wd_action == 'decline':
             db_execute("UPDATE creator_withdrawals SET status = 'declined' WHERE id = ?", (wd_id,), commit=True)
             db_execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (wd_info['amount'], target_user_id), commit=True)
             bot.send_message(target_user_id, f"❌ Ваша заявка на вывод {wd_info['amount']:.2f} ₽ отклонена. Средства возвращены на баланс.")
+            bot.edit_message_text(text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML", reply_markup=None)
         elif wd_action == 'reply':
             msg = bot.send_message(chat_id, f"Введите текст сообщения для пользователя {target_user_id}:", reply_markup=create_cancel_markup())
             set_user_state(user_id, {'action': 'admin_reply_text', 'target_user_id': target_user_id, 'bot_id': None, 'message_id': msg.message_id, 'call_id': call.id})
@@ -4630,7 +4637,7 @@ if __name__ == '__main__':
             welcome += "\n\n<i>Креатор создан с помощью</i> @MinxoCreate_bot"
         bot.send_message(message.chat.id, welcome, reply_markup=create_main_menu(message.from_user.id), parse_mode="HTML")
 
-    @bot.message_handler(func=lambda message: message.from_user.id in user_states)
+    @bot.message_handler(content_types=['text', 'photo', 'video', 'document', 'audio', 'voice', 'sticker', 'animation'], func=lambda message: message.from_user.id in user_states)
     def handle_state_messages(message):
         process_state_input(message)
         
