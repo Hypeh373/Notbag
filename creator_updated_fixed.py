@@ -253,6 +253,18 @@ def row_to_dict(record):
         return {key: record[key] for key in record.keys()}
     return record
 
+def extract_username(user_record, default_value=None):
+    """
+    Safely extract username from user records (dict/sqlite row), returning default when missing.
+    """
+    if not user_record:
+        return default_value
+    try:
+        username = user_record['username']
+    except (TypeError, KeyError):
+        username = None
+    return username or default_value
+
 def is_admin(user_id: int) -> bool:
     try:
         return int(user_id) in set(int(x) for x in ADMIN_IDS)
@@ -475,6 +487,11 @@ def init_db():
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cashlait_task_price', '0.1')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cashlait_min_completions', '10')")
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('dicelite_price', '1.0')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('dicelite_vip_price', '120.0')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('vip_other_payment_link', '')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('creator_other_payment_link', '')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('cashlait_other_payment_link', '')")
+        cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('dicelite_other_payment_link', '')")
         # Watermark toggle for creator welcome message (enabled by default)
         cursor.execute("INSERT OR IGNORE INTO settings (key, value) VALUES ('creator_watermark_enabled', '1')")
         # Global toggle for '📋 Списки ботов' feature (enabled by default)
@@ -687,6 +704,56 @@ def set_setting(key, value):
 
 def delete_setting(key):
     db_execute("DELETE FROM settings WHERE key = ?", (key,), commit=True)
+
+def get_float_setting(key, default_value):
+    """
+    Safely read numeric settings stored as text. Returns default_value on error.
+    """
+    try:
+        value = get_setting(key)
+        if value is None:
+            return float(default_value)
+        return float(str(value).replace(",", "."))
+    except (TypeError, ValueError):
+        return float(default_value)
+
+def get_vip_price_for_bot(bot_info):
+    """
+    Returns VIP price taking into account DiceLite-specific override.
+    """
+    if bot_info and bot_info.get('bot_type') == 'dicelite':
+        dicelite_specific = get_setting('dicelite_vip_price')
+        try:
+            if dicelite_specific is not None:
+                parsed = float(str(dicelite_specific).replace(",", "."))
+                if parsed > 0:
+                    return parsed
+        except (TypeError, ValueError):
+            pass
+    return get_float_setting('vip_price', 120.0)
+
+def get_other_payment_link(flow_key):
+    """
+    Read alternative payment link (if any) for provided flow key.
+    Returns None when not configured or blank.
+    """
+    setting_key = f"{flow_key}_other_payment_link"
+    raw_value = get_setting(setting_key)
+    if not raw_value:
+        return None
+    trimmed = str(raw_value).strip()
+    if not trimmed or trimmed in ('0', '-', 'none', 'None'):
+        return None
+    return trimmed
+
+def create_other_payment_button(link_value, callback_data, text="👤 Другой способ"):
+    """
+    Utility to build inline button for alternate payment.
+    Uses URL button when link exists, otherwise falls back to callback button.
+    """
+    if link_value:
+        return types.InlineKeyboardButton(text, url=link_value)
+    return types.InlineKeyboardButton(text, callback_data=callback_data)
 
 def is_customization_unlocked():
     try:
@@ -2947,7 +3014,7 @@ def process_state_input(message):
                 callback_to_return = "admin_vip_manage"
             elif setting_key in ('cashlait_price', 'cashlait_task_price', 'cashlait_min_completions'):
                 callback_to_return = "admin_cashlait_manage"
-            elif setting_key == 'dicelite_price':
+            elif setting_key in ('dicelite_price', 'dicelite_vip_price'):
                 callback_to_return = "admin_dicelite_manage"
             elif setting_key == 'bots_list_min_users':
                 callback_to_return = "admin_lists_menu"
@@ -2960,6 +3027,60 @@ def process_state_input(message):
             handle_admin_callbacks(call_imitation)
         except ValueError:
             bot.send_message(user_id, "❌ Ошибка! Введите положительное числовое значение.")
+        return
+
+    if action == 'admin_set_link_setting':
+        setting_key = state.get('setting_key')
+        callback_to_return = state.get('callback_to_return', 'admin_back')
+        raw_text = (getattr(message, 'text', '') or '').strip()
+        if not setting_key:
+            if user_id in user_states:
+                del user_states[user_id]
+            return
+        normalized = raw_text
+        cleared = False
+        if not normalized:
+            bot.send_message(user_id, "❌ Ссылка не может быть пустой. Отправьте корректный URL или 0 для очистки.")
+            return
+        if normalized.lower() in ('0', 'none', 'нет', 'no', 'off', 'удалить', 'remove', 'clear', '-'):
+            set_setting(setting_key, '')
+            cleared = True
+        else:
+            set_setting(setting_key, normalized)
+        if user_id in user_states:
+            del user_states[user_id]
+        try:
+            bot.delete_message(user_id, state.get('message_id'))
+        except Exception:
+            pass
+        try:
+            bot.delete_message(user_id, message.message_id)
+        except Exception:
+            pass
+        result_text = "✅ Ссылка удалена." if cleared else "✅ Ссылка сохранена."
+        call_id = state.get('call_id', f"link_{user_id}")
+        try:
+            bot.answer_callback_query(call_id, result_text)
+        except Exception:
+            pass
+        call_imitation = types.CallbackQuery(
+            id=call_id,
+            from_user=message.from_user,
+            data=callback_to_return,
+            chat_instance="private",
+            json_string=""
+        )
+        fake_message = types.Message(
+            message_id=state.get('message_id'),
+            from_user=None,
+            date=None,
+            chat=message.chat,
+            content_type='text',
+            options={},
+            json_string=""
+        )
+        call_imitation.message = fake_message
+        handle_admin_callbacks(call_imitation)
         return
 
     if action == 'admin_lists_by_id_input':
@@ -3180,10 +3301,13 @@ def handle_admin_callbacks(call):
             cashlait_price = get_setting('cashlait_price') or '1.0'
             task_price = get_setting('cashlait_task_price') or '0.1'
             min_completions = get_setting('cashlait_min_completions') or '10'
+            cashlait_link = get_other_payment_link('cashlait')
+            link_status = "указана" if cashlait_link else "не указана"
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(types.InlineKeyboardButton(f"💰 Изменить цену CashLait ({cashlait_price} $)", callback_data="admin_cashlait_set_price"))
             markup.add(types.InlineKeyboardButton(f"💵 Цена за задание ({task_price} $)", callback_data="admin_cashlait_set_task_price"))
             markup.add(types.InlineKeyboardButton(f"📊 Мин. выполнений ({min_completions})", callback_data="admin_cashlait_set_min_completions"))
+            markup.add(types.InlineKeyboardButton(f"🌐 Ссылка 'Другой способ' ({link_status})", callback_data="admin_cashlait_set_otherlink"))
             markup.add(types.InlineKeyboardButton("🎁 Выдать CashLait бота", callback_data="admin_cashlait_grant"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
             try:
@@ -3208,6 +3332,21 @@ def handle_admin_callbacks(call):
                                             reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_cashlait_manage")))
                 set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'cashlait_min_completions', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message, 'min_value': 1.0})
                 return
+            elif parts[3] == "otherlink":
+                prompt = (
+                    "🔗 Отправьте ссылку для кнопки 'Другой способ' при покупке CashLait.\n"
+                    "Отправьте 0, чтобы очистить ссылку."
+                )
+                markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_cashlait_manage"))
+                msg = bot.edit_message_text(prompt, user_id, call.message.message_id, reply_markup=markup)
+                set_user_state(user_id, {
+                    'action': 'admin_set_link_setting',
+                    'setting_key': 'cashlait_other_payment_link',
+                    'message_id': msg.message_id,
+                    'call_id': call.id,
+                    'callback_to_return': 'admin_cashlait_manage'
+                })
+                return
         
         elif sub_action == "grant":
             cancel_markup = types.InlineKeyboardMarkup().add(
@@ -3231,8 +3370,13 @@ def handle_admin_callbacks(call):
             if user_id in user_states:
                 del user_states[user_id]
             dicelite_price = get_setting('dicelite_price') or '1.0'
+            dicelite_vip_price = get_setting('dicelite_vip_price') or (get_setting('vip_price') or '120.0')
+            dicelite_link = get_other_payment_link('dicelite')
+            link_status = "указана" if dicelite_link else "не указана"
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(types.InlineKeyboardButton(f"💰 Изменить цену DiceLite ({dicelite_price} $)", callback_data="admin_dicelite_set_price"))
+            markup.add(types.InlineKeyboardButton(f"💎 VIP цена DiceLite ({dicelite_vip_price} $)", callback_data="admin_dicelite_set_vip_price"))
+            markup.add(types.InlineKeyboardButton(f"🌐 Ссылка 'Другой способ' ({link_status})", callback_data="admin_dicelite_set_otherlink"))
             markup.add(types.InlineKeyboardButton("🎁 Выдать DiceLite бота", callback_data="admin_dicelite_grant"))
             markup.add(types.InlineKeyboardButton("🔗 Ссылка на креатора", callback_data="admin_dicelite_link"))
             markup.add(types.InlineKeyboardButton("📝 Текст кнопки", callback_data="admin_dicelite_linktext"))
@@ -3244,21 +3388,60 @@ def handle_admin_callbacks(call):
             return
 
         if sub_action == "set":
-            try:
-                msg = bot.edit_message_text(
-                    "💰 Введите новую цену (в $) для DiceLite:",
-                    user_id,
-                    call.message.message_id,
-                    reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_dicelite_manage"))
+            target = parts[3] if len(parts) > 3 else "price"
+            if target == "price":
+                try:
+                    msg = bot.edit_message_text(
+                        "💰 Введите новую цену (в $) для DiceLite:",
+                        user_id,
+                        call.message.message_id,
+                        reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_dicelite_manage"))
+                    )
+                except telebot.apihelper.ApiTelegramException:
+                    msg = bot.send_message(
+                        user_id,
+                        "💰 Введите новую цену (в $) для DiceLite:",
+                        reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_dicelite_manage"))
+                    )
+                set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'dicelite_price', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message, 'min_value': 1.0})
+                return
+            if target == "vip":
+                prompt = (
+                    "💎 Введите новую цену VIP (в $) для ботов DiceLite.\n"
+                    "Минимум 1.0"
                 )
-            except telebot.apihelper.ApiTelegramException:
-                msg = bot.send_message(
-                    user_id,
-                    "💰 Введите новую цену (в $) для DiceLite:",
-                    reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_dicelite_manage"))
+                markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_dicelite_manage"))
+                try:
+                    msg = bot.edit_message_text(prompt, user_id, call.message.message_id, reply_markup=markup)
+                except telebot.apihelper.ApiTelegramException:
+                    msg = bot.send_message(user_id, prompt, reply_markup=markup)
+                set_user_state(user_id, {
+                    'action': 'admin_change_setting',
+                    'setting_key': 'dicelite_vip_price',
+                    'message_id': msg.message_id,
+                    'call_id': call.id,
+                    'message': call.message,
+                    'min_value': 1.0
+                })
+                return
+            if target == "otherlink":
+                prompt = (
+                    "🔗 Отправьте ссылку для кнопки 'Другой способ' при покупке DiceLite.\n"
+                    "Отправьте 0, чтобы удалить ссылку."
                 )
-            set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'dicelite_price', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message, 'min_value': 1.0})
-            return
+                markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_dicelite_manage"))
+                try:
+                    msg = bot.edit_message_text(prompt, user_id, call.message.message_id, reply_markup=markup)
+                except telebot.apihelper.ApiTelegramException:
+                    msg = bot.send_message(user_id, prompt, reply_markup=markup)
+                set_user_state(user_id, {
+                    'action': 'admin_set_link_setting',
+                    'setting_key': 'dicelite_other_payment_link',
+                    'message_id': msg.message_id,
+                    'call_id': call.id,
+                    'callback_to_return': 'admin_dicelite_manage'
+                })
+                return
 
         if sub_action == "grant":
             try:
@@ -3885,8 +4068,11 @@ def handle_admin_callbacks(call):
                 del user_states[user_id]
 
             vip_price = get_setting('vip_price') or '120.0'
+            vip_link = get_other_payment_link('vip')
+            link_status = "указана" if vip_link else "не указана"
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(types.InlineKeyboardButton(f"💰 Изменить цену VIP ({vip_price} ₽)", callback_data="admin_vip_set_price"))
+            markup.add(types.InlineKeyboardButton(f"🌐 Ссылка 'Другой способ' ({link_status})", callback_data="admin_vip_link"))
             markup.add(types.InlineKeyboardButton("🎁 Выдать VIP", callback_data="admin_vip_grant"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
             bot.edit_message_text("₽ Управление VIP-статусом:", chat_id, call.message.message_id, reply_markup=markup)
@@ -3895,6 +4081,21 @@ def handle_admin_callbacks(call):
             msg = bot.edit_message_text("Введите новую цену для VIP-статуса (например, 120.0):", chat_id, call.message.message_id,
                                         reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_vip_manage")))
             set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'vip_price', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+
+        elif sub_action == "link":
+            prompt = (
+                "🔗 Отправьте ссылку для кнопки 'Другой способ' при покупке VIP.\n"
+                "Отправьте 0, чтобы очистить ссылку."
+            )
+            markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_vip_manage"))
+            msg = bot.edit_message_text(prompt, chat_id, call.message.message_id, reply_markup=markup)
+            set_user_state(user_id, {
+                'action': 'admin_set_link_setting',
+                'setting_key': 'vip_other_payment_link',
+                'message_id': msg.message_id,
+                'call_id': call.id,
+                'callback_to_return': 'admin_vip_manage'
+            })
         
         elif sub_action == "grant":
             cancel_markup = types.InlineKeyboardMarkup().add(
@@ -4151,10 +4352,13 @@ def handle_admin_callbacks(call):
             op_reward = get_setting('op_reward') or "1.0"
             stars_reward = get_setting('stars_sub_reward') or "1.0"
             creator_price = get_setting('creator_price') or "500.0"
+            creator_link = get_other_payment_link('creator')
+            creator_link_status = "указана" if creator_link else "не указана"
             markup = types.InlineKeyboardMarkup(row_width=1)
             markup.add(types.InlineKeyboardButton(f"💸 Награда за Flyer ОП (реф. бот): {op_reward} ₽", callback_data="admin_op_set_reward"))
             markup.add(types.InlineKeyboardButton(f"⭐ Награда за подписку (звёзды): {stars_reward} ₽", callback_data="admin_op_set_stars_reward"))
             markup.add(types.InlineKeyboardButton(f"🎨 Цена бота Креатор: {creator_price} USDT", callback_data="admin_op_set_creator_price"))
+            markup.add(types.InlineKeyboardButton(f"🌐 Ссылка 'Другой способ' (Креатор) ({creator_link_status})", callback_data="admin_op_set_creator_link"))
             markup.add(types.InlineKeyboardButton("✏️ Изменить приветствие креатора", callback_data="admin_edit_creator_welcome"))
             markup.add(types.InlineKeyboardButton("📊 Лимит бесплатных ботов", callback_data="admin_set_max_bots"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
@@ -4171,6 +4375,21 @@ def handle_admin_callbacks(call):
             elif setting_type == "creator" and parts[4] == "price":
                 current_price = get_setting('creator_price') or "500.0"; setting_key = 'creator_price'
                 prompt_text = f"Текущая цена бота Креатор: {current_price} USDT.\n\nВведите новое значение:"
+            elif setting_type == "creator" and parts[4] == "link":
+                prompt_text = (
+                    "🔗 Отправьте ссылку для кнопки 'Другой способ' при покупке Креатора.\n"
+                    "Отправьте 0, чтобы удалить ссылку."
+                )
+                markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_op_manage"))
+                msg = bot.edit_message_text(prompt_text, chat_id, call.message.message_id, reply_markup=markup)
+                set_user_state(user_id, {
+                    'action': 'admin_set_link_setting',
+                    'setting_key': 'creator_other_payment_link',
+                    'message_id': msg.message_id,
+                    'call_id': call.id,
+                    'callback_to_return': 'admin_op_manage'
+                })
+                return
             if setting_key and prompt_text:
                 markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_op_manage"))
                 msg = bot.edit_message_text(prompt_text, chat_id, call.message.message_id, reply_markup=markup)
@@ -4581,7 +4800,8 @@ if __name__ == '__main__':
                                         # Уведомляем администратора о покупке
                                         try:
                                             buyer = get_user(owner_id_new)
-                                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice.invoice_id}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
+                                            buyer_username = extract_username(buyer, default_value='N/A')
+                                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer_username)}) оплатил счет #{invoice.invoice_id}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
                                         except Exception as e:
                                             logging.warning(f"Не удалось уведомить админа о фоновой покупке CashLait: {e}")
                                     elif invoice.payload.startswith('creator_new_'):
@@ -4597,7 +4817,8 @@ if __name__ == '__main__':
                                         # Уведомляем администратора о покупке
                                         try:
                                             buyer = get_user(owner_id_new)
-                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
+                                            buyer_username = extract_username(buyer, default_value='N/A')
+                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer_username)}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
                                         except Exception as e:
                                             logging.warning(f"Не удалось уведомить админа о фоновой покупке Креатора: {e}")
                                     elif invoice.payload.startswith('creator_'):
@@ -4613,7 +4834,8 @@ if __name__ == '__main__':
                                         # Уведомляем администратора
                                         try:
                                             buyer = get_user(owner_id_existing)
-                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_existing}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
+                                            buyer_username = extract_username(buyer, default_value='N/A')
+                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_existing}</code> (@{escape(buyer_username)}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
                                         except Exception as e:
                                             logging.warning(f"Не удалось уведомить админа о фоновой покупке Креатора (existing): {e}")
                 except Exception as e:
@@ -4965,7 +5187,7 @@ if __name__ == '__main__':
                         bot.answer_callback_query(call.id, "✅ У этого бота уже есть VIP-статус.", show_alert=True)
                         return
 
-                    vip_price = float(get_setting('vip_price') or 120.0)
+                    vip_price = get_vip_price_for_bot(bot_info)
                     text = (f"⭐ <b>Покупка VIP-статуса</b>\n\n"
                             f"Стоимость: <b>{vip_price:.2f} USDT</b>\n\n"
                             f"Что дает VIP-статус?\n"
@@ -4975,40 +5197,45 @@ if __name__ == '__main__':
                     markup = types.InlineKeyboardMarkup(row_width=1)
                     if is_crypto_token_configured():
                         markup.add(types.InlineKeyboardButton("💳 Crypto Bot", callback_data=f"vip_{bot_id}_crypto_pay"))
-                    markup.add(types.InlineKeyboardButton("👤 Другой способ", callback_data=f"vip_{bot_id}_other_payment"))
+                    vip_other_link = get_other_payment_link('vip')
+                    markup.add(create_other_payment_button(vip_other_link, f"vip_{bot_id}_other_payment"))
                     markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"actions_{bot_id}"))
                     bot.edit_message_text(text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
                 
-                elif action == 'crypto':
-                    if parts[3] == 'pay':
-                        if not is_crypto_token_configured():
-                            bot.answer_callback_query(call.id, "❌ Crypto Pay токен не настроен.", show_alert=True)
-                            return
-                        local_crypto = get_crypto_client()
-                        if not local_crypto:
-                            bot.answer_callback_query(call.id, "❌ Crypto Pay недоступен сейчас.", show_alert=True)
-                            return
-                        bot.answer_callback_query(call.id, "⏳ Создаю счет...")
-                        vip_price = float(get_setting('vip_price') or 120.0)
-                        
-                        async def create_invoice_async():
-                            try:
-                                invoice = await local_crypto.create_invoice(asset='USDT', amount=vip_price, fiat='RUB', payload=f"vip_{bot_id}")
-                                if invoice:
-                                    db_execute("INSERT INTO crypto_payments (invoice_id, bot_id, user_id, amount, status) VALUES (?, ?, ?, ?, 'pending')",
-                                               (invoice.invoice_id, bot_id, user_id, vip_price), commit=True)
-                                    markup = types.InlineKeyboardMarkup(row_width=1)
-                                    markup.add(types.InlineKeyboardButton("💳 Оплатить счет", url=invoice.bot_invoice_url))
-                                    markup.add(types.InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"vip_{bot_id}_check_{invoice.invoice_id}"))
-                                    markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"vip_{bot_id}_toggle"))
-                                    bot.edit_message_text("✅ Счет создан. Нажмите на кнопку ниже для оплаты.", user_id, call.message.message_id, reply_markup=markup)
-                            except Exception as e:
-                                logging.error(f"Ошибка создания счета CryptoPay: {e}")
-                                bot.answer_callback_query(call.id, "❌ Не удалось создать счет. Попробуйте позже.", show_alert=True)
-                        
-                        run_async_task(create_invoice_async())
+                elif action == 'crypto' and parts[3] == 'pay':
+                    if not is_crypto_token_configured():
+                        bot.answer_callback_query(call.id, "❌ Crypto Pay токен не настроен.", show_alert=True)
+                        return
+                    local_crypto = get_crypto_client()
+                    if not local_crypto:
+                        bot.answer_callback_query(call.id, "❌ Crypto Pay недоступен сейчас.", show_alert=True)
+                        return
+                    bot.answer_callback_query(call.id, "⏳ Создаю счет...")
+                    bot_info = get_bot_by_id(bot_id)
+                    vip_price = get_vip_price_for_bot(bot_info)
+                    
+                    async def create_invoice_async():
+                        try:
+                            invoice = await local_crypto.create_invoice(asset='USDT', amount=vip_price, fiat='RUB', payload=f"vip_{bot_id}")
+                            if invoice:
+                                db_execute("INSERT INTO crypto_payments (invoice_id, bot_id, user_id, amount, status) VALUES (?, ?, ?, ?, 'pending')",
+                                           (invoice.invoice_id, bot_id, user_id, vip_price), commit=True)
+                                markup = types.InlineKeyboardMarkup(row_width=1)
+                                markup.add(types.InlineKeyboardButton("💳 Оплатить счет", url=invoice.bot_invoice_url))
+                                markup.add(types.InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"vip_{bot_id}_check_{invoice.invoice_id}"))
+                                markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"vip_{bot_id}_toggle"))
+                                bot.edit_message_text("✅ Счет создан. Нажмите на кнопку ниже для оплаты.", user_id, call.message.message_id, reply_markup=markup)
+                        except Exception as e:
+                            logging.error(f"Ошибка создания счета CryptoPay: {e}")
+                            bot.answer_callback_query(call.id, "❌ Не удалось создать счет. Попробуйте позже.", show_alert=True)
+                    
+                    run_async_task(create_invoice_async())
 
                 elif action == 'other':
+                    vip_link = get_other_payment_link('vip')
+                    if vip_link:
+                        bot.answer_callback_query(call.id, "Используйте кнопку-ссылку 'Другой способ' выше.", show_alert=True)
+                        return
                     admin_info = bot.get_chat(ADMIN_ID)
                     bot.edit_message_text(f"Для покупки другим способом, пожалуйста, свяжитесь с администратором: @{admin_info.username}",
                                           user_id, call.message.message_id,
@@ -5039,6 +5266,7 @@ if __name__ == '__main__':
                 parts = call.data.split('_')
                 bot_id = int(parts[2])
                 creator_price = float(get_setting('creator_price') or 500.0)
+                creator_other_link = get_other_payment_link('creator')
                 
                 text = (f"🎨 <b>Покупка бота Креатор</b>\n\n"
                         f"Стоимость: <b>{creator_price:.2f} USDT</b>\n\n"
@@ -5050,7 +5278,7 @@ if __name__ == '__main__':
                 markup = types.InlineKeyboardMarkup(row_width=1)
                 if is_crypto_token_configured():
                     markup.add(types.InlineKeyboardButton("💳 Crypto Bot", callback_data=f"creator_{bot_id}_crypto_pay"))
-                markup.add(types.InlineKeyboardButton("👤 Другой способ", callback_data=f"creator_{bot_id}_other_payment"))
+                markup.add(create_other_payment_button(creator_other_link, f"creator_{bot_id}_other_payment"))
                 markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"actions_{bot_id}"))
                 bot.edit_message_text(text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
                 return
@@ -5087,6 +5315,10 @@ if __name__ == '__main__':
                     run_async_task(create_creatornew_invoice_async())
                     return
                 elif action == 'other' and parts[2] == 'payment':
+                    creator_link = get_other_payment_link('creator')
+                    if creator_link:
+                        bot.answer_callback_query(call.id, "Используйте кнопку-ссылку 'Другой способ' выше.", show_alert=True)
+                        return
                     admin_info = bot.get_chat(ADMIN_ID)
                     bot.edit_message_text(f"Для покупки бота Креатор другим способом, свяжитесь с администратором: @{admin_info.username}",
                                           user_id, call.message.message_id,
@@ -5108,7 +5340,8 @@ if __name__ == '__main__':
                                                   reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ В меню ботов", callback_data="back_to_bots_list")))
                             try:
                                 buyer = get_user(user_id)
-                                bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора: пользователь <code>{user_id}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice_id_to_check}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
+                                buyer_username = extract_username(buyer, default_value='N/A')
+                                bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора: пользователь <code>{user_id}</code> (@{escape(buyer_username)}) оплатил счет #{invoice_id_to_check}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
                             except Exception as e:
                                 logging.warning(f"Не удалось уведомить админа о покупке Креатора: {e}")
                         else:
@@ -5133,7 +5366,8 @@ if __name__ == '__main__':
                                               reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ В меню ботов", callback_data="back_to_bots_list")))
                         try:
                             buyer = get_user(user_id)
-                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait: пользователь <code>{user_id}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice_id_to_check}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
+                            buyer_username = extract_username(buyer, default_value='N/A')
+                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait: пользователь <code>{user_id}</code> (@{escape(buyer_username)}) оплатил счет #{invoice_id_to_check}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
                         except Exception as e:
                             logging.warning(f"Не удалось уведомить админа о покупке CashLait: {e}")
                     else:
@@ -5162,9 +5396,10 @@ if __name__ == '__main__':
                         )
                         try:
                             buyer = get_user(user_id)
+                            buyer_username = extract_username(buyer, default_value='N/A')
                             bot.send_message(
                                 ADMIN_ID,
-                                f"🛒 Покупка DiceLite: пользователь <code>{user_id}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice_id_to_check}. Создан бот #{dicelite_bot_id}.",
+                                f"🛒 Покупка DiceLite: пользователь <code>{user_id}</code> (@{escape(buyer_username)}) оплатил счет #{invoice_id_to_check}. Создан бот #{dicelite_bot_id}.",
                                 parse_mode="HTML"
                             )
                         except Exception as e:
@@ -5211,12 +5446,21 @@ if __name__ == '__main__':
                         run_async_task(create_creator_invoice_async())
                         return
                     
-                    elif action == 'other':
-                        admin_info = bot.get_chat(ADMIN_ID)
-                        bot.edit_message_text(f"Для покупки бота Креатор другим способом, пожалуйста, свяжитесь с администратором: @{admin_info.username}",
-                                              user_id, call.message.message_id,
-                                              reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data=f"buy_creator_{bot_id}")))
+                elif action == 'other':
+                    creator_link = get_other_payment_link('creator')
+                    if creator_link:
+                        bot.answer_callback_query(call.id, "Используйте кнопку-ссылку 'Другой способ' выше.", show_alert=True)
                         return
+                    admin_info = bot.get_chat(ADMIN_ID)
+                    bot.edit_message_text(
+                        f"Для покупки бота Креатор другим способом, пожалуйста, свяжитесь с администратором: @{admin_info.username}",
+                        user_id,
+                        call.message.message_id,
+                        reply_markup=types.InlineKeyboardMarkup().add(
+                            types.InlineKeyboardButton("⬅️ Назад", callback_data=f"buy_creator_{bot_id}")
+                        )
+                    )
+                    return
                     
                     elif action == 'check':
                         invoice_id_to_check = int(parts[3])
@@ -5365,6 +5609,10 @@ if __name__ == '__main__':
             if call.data == "back_to_bots_list":
                 bot.answer_callback_query(call.id)
                 bot.edit_message_text("Ниже представлен список ваших ботов:", user_id, call.message.message_id, reply_markup=create_my_bots_menu(user_id)); return
+            if call.data == "create_bot_back":
+                bot.answer_callback_query(call.id)
+                bot.edit_message_text(get_custom_text('create_bot_prompt'), user_id, call.message.message_id, parse_mode="HTML", reply_markup=create_bot_type_menu(user_id))
+                return
             if call.data == "create_bot_ref":
                 bot.answer_callback_query(call.id, "Бот создается...")
                 bot_id = create_bot_in_db(user_id, 'ref')
@@ -5382,6 +5630,21 @@ if __name__ == '__main__':
                 bot_id = create_bot_in_db(user_id, 'anonchat')
                 bot.edit_message_text(f"💬 Бот 'Анонимный чат' #{bot_id} создан! Теперь он в списке ваших ботов:", user_id, call.message.message_id, reply_markup=create_my_bots_menu(user_id)); return
             if call.data == "create_bot_cashlait":
+                bot.answer_callback_query(call.id)
+                cashlait_price = float(get_setting('cashlait_price') or 1.0)
+                cashlait_link = get_other_payment_link('cashlait')
+                text = (
+                    f"💼 Стоимость CashLait бота: <b>{cashlait_price:.2f} $</b>\n\n"
+                    "Выберите способ оплаты для покупки этого бота:"
+                )
+                markup = types.InlineKeyboardMarkup(row_width=1)
+                if is_crypto_token_configured():
+                    markup.add(types.InlineKeyboardButton("💳 Crypto Bot", callback_data="cashlaitnew_crypto_pay"))
+                markup.add(create_other_payment_button(cashlait_link, "cashlaitnew_other_payment"))
+                markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="create_bot_back"))
+                bot.edit_message_text(text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+                return
+            if call.data == "cashlaitnew_crypto_pay":
                 if not is_crypto_token_configured():
                     bot.answer_callback_query(call.id, "❌ Crypto Pay токен не настроен.", show_alert=True)
                     return
@@ -5403,8 +5666,7 @@ if __name__ == '__main__':
                             markup.add(types.InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"cashlaitnew_check_{invoice.invoice_id}"))
                             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="create_bot_cashlait"))
                             bot.edit_message_text(
-                                f"💼 Стоимость CashLait бота: {cashlait_price:.2f} $.\n"
-                                f"Оплатите счет по кнопке ниже и возвращайтесь сюда для проверки оплаты.",
+                                "✅ Счет создан. Нажмите на кнопку ниже для оплаты.",
                                 user_id,
                                 call.message.message_id,
                                 reply_markup=markup
@@ -5414,7 +5676,35 @@ if __name__ == '__main__':
                         bot.answer_callback_query(call.id, "❌ Не удалось создать счет. Попробуйте позже.", show_alert=True)
                 run_async_task(create_cashlait_invoice_async())
                 return
+            if call.data == "cashlaitnew_other_payment":
+                link = get_other_payment_link('cashlait')
+                if link:
+                    bot.answer_callback_query(call.id, "Используйте кнопку-ссылку 'Другой способ' выше.", show_alert=True)
+                else:
+                    admin_info = bot.get_chat(ADMIN_ID)
+                    bot.edit_message_text(
+                        f"Для покупки CashLait другим способом свяжитесь с администратором: @{admin_info.username}",
+                        user_id,
+                        call.message.message_id,
+                        reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="create_bot_cashlait"))
+                    )
+                return
             if call.data == "create_bot_dicelite":
+                bot.answer_callback_query(call.id)
+                dicelite_price = float(get_setting('dicelite_price') or 1.0)
+                dicelite_link = get_other_payment_link('dicelite')
+                text = (
+                    f"🎲 Стоимость DiceLite бота: <b>{dicelite_price:.2f} $</b>\n\n"
+                    "Выберите способ оплаты для покупки этого бота:"
+                )
+                markup = types.InlineKeyboardMarkup(row_width=1)
+                if is_crypto_token_configured():
+                    markup.add(types.InlineKeyboardButton("💳 Crypto Bot", callback_data="dicelitenew_crypto_pay"))
+                markup.add(create_other_payment_button(dicelite_link, "dicelitenew_other_payment"))
+                markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="create_bot_back"))
+                bot.edit_message_text(text, user_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+                return
+            if call.data == "dicelitenew_crypto_pay":
                 if not is_crypto_token_configured():
                     bot.answer_callback_query(call.id, "❌ Crypto Pay токен не настроен.", show_alert=True)
                     return
@@ -5436,8 +5726,7 @@ if __name__ == '__main__':
                             markup.add(types.InlineKeyboardButton("🔄 Проверить оплату", callback_data=f"dicelitenew_check_{invoice.invoice_id}"))
                             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="create_bot_dicelite"))
                             bot.edit_message_text(
-                                f"🎲 Стоимость DiceLite бота: {dicelite_price:.2f} $.\n"
-                                f"Оплатите счет по кнопке ниже и возвращайтесь сюда для проверки оплаты.",
+                                "✅ Счет создан. Нажмите на кнопку ниже для оплаты.",
                                 user_id,
                                 call.message.message_id,
                                 reply_markup=markup
@@ -5446,6 +5735,19 @@ if __name__ == '__main__':
                         logging.error(f"Ошибка создания счета CryptoPay для DiceLite: {e}")
                         bot.answer_callback_query(call.id, "❌ Не удалось создать счет. Попробуйте позже.", show_alert=True)
                 run_async_task(create_dicelite_invoice_async())
+                return
+            if call.data == "dicelitenew_other_payment":
+                link = get_other_payment_link('dicelite')
+                if link:
+                    bot.answer_callback_query(call.id, "Используйте кнопку-ссылку 'Другой способ' выше.", show_alert=True)
+                else:
+                    admin_info = bot.get_chat(ADMIN_ID)
+                    bot.edit_message_text(
+                        f"Для покупки DiceLite другим способом свяжитесь с администратором: @{admin_info.username}",
+                        user_id,
+                        call.message.message_id,
+                        reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="create_bot_dicelite"))
+                    )
                 return
             if call.data == "create_bot_exchange":
                 bot.answer_callback_query(call.id, "Бот создается...")

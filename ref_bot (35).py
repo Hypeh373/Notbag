@@ -1,7 +1,21 @@
 # -*- coding: utf-8 -*-
 import telebot
 from telebot import types
-from telebot.util import escape_markdown
+try:
+    from telebot.formatting import escape_markdown
+except ImportError:
+    def escape_markdown(text, version=2):
+        """
+        Minimal fallback to escape Markdown special characters when telebot.formatting is unavailable.
+        """
+        escape_chars = r'\_*[]()~`>#+-=|{}.!'
+        escaped = ""
+        for char in text:
+            if char in escape_chars:
+                escaped += f"\\{char}"
+            else:
+                escaped += char
+        return escaped
 import sqlite3
 import sys
 import os
