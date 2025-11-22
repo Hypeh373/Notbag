@@ -2144,7 +2144,7 @@ def process_state_input(message):
             return
         # build preview (copy the submitted content into admin chat)
         try:
-            preview = bot.copy_message(ADMIN_ID, message.chat.id, message.message_id)
+            preview = bot.copy_message(message.chat.id, message.chat.id, message.message_id)
             preview_markup = preview.reply_markup
             preview_id = preview.message_id
             try:
@@ -2155,13 +2155,13 @@ def process_state_input(message):
             preview_markup = None
             preview_id = message.message_id
         try:
-            bot.edit_message_text("Проверка контента перед рассылкой:", ADMIN_ID, state['message_id'])
+            bot.edit_message_text("Проверка контента перед рассылкой:", message.chat.id, state['message_id'])
         except Exception:
             pass
         # Ask for optional inline button (text | URL) before confirming
         try:
             prompt = bot.send_message(
-                ADMIN_ID,
+                message.chat.id,
                 "<b>Шаг 2/2:</b> Добавить инлайн-кнопку?\nОтправьте в формате <code>Текст | URL</code> или <code>-</code> для пропуска.",
                 parse_mode="HTML",
                 reply_markup=create_cancel_markup()
@@ -2206,7 +2206,7 @@ def process_state_input(message):
 
         # Try to apply the selected markup to the preview message
         try:
-            bot.edit_message_reply_markup(ADMIN_ID, preview_id, reply_markup=button_markup)
+            bot.edit_message_reply_markup(message.chat.id, preview_id, reply_markup=button_markup)
         except Exception:
             pass
 
@@ -2215,7 +2215,7 @@ def process_state_input(message):
         confirm.add(types.InlineKeyboardButton("✅ Начать рассылку в ботах", callback_data=f"admin_broadcast_bots_confirm"))
         confirm.add(types.InlineKeyboardButton("❌ Отмена", callback_data="admin_back"))
         try:
-            bot.send_message(ADMIN_ID, f"Будет отправлено в боты: {', '.join(map(str, target_bot_ids))}", reply_markup=confirm)
+            bot.send_message(message.chat.id, f"Будет отправлено в боты: {', '.join(map(str, target_bot_ids))}", reply_markup=confirm)
         except Exception:
             pass
         set_user_state(message.from_user.id, {
@@ -2900,7 +2900,7 @@ def process_state_input(message):
         start_bot_process(bot_id)
         
         bot.send_message(target_user_id, f"✅ Ваша заявка на подключение Flyer для бота #{bot_id} была *одобрена*! Система активирована, бот перезапущен.")
-        bot.edit_message_text(state['original_text'] + "\n\n<b>Статус: ✅ ОДОБРЕНО И КЛЮЧ УСТАНОВЛЕН</b>", ADMIN_ID, state['message_id'], parse_mode="HTML")
+        bot.edit_message_text(state['original_text'] + "\n\n<b>Статус: ✅ ОДОБРЕНО И КЛЮЧ УСТАНОВЛЕН</b>", message.from_user.id, state['message_id'], parse_mode="HTML")
         if user_id in user_states: del user_states[user_id]
         bot.send_message(user_id, "Ключ успешно установлен, бот перезапущен.", reply_markup=create_main_menu(user_id))
         return
@@ -3142,6 +3142,7 @@ def handle_personal_cabinet(message_or_call):
 
 def handle_admin_callbacks(call):
     user_id = call.from_user.id
+    chat_id = call.message.chat.id if call.message else user_id
     if not is_admin(user_id): 
         bot.answer_callback_query(call.id)
         return
@@ -3495,29 +3496,25 @@ def handle_admin_callbacks(call):
             markup.add(types.InlineKeyboardButton(f"⚙️ Порог для 'Списков ботов' ({current_min})", callback_data="admin_lists_set_min"))
             markup.add(types.InlineKeyboardButton("🔎 Управление по ID", callback_data="admin_list_byid_start"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
-            bot.edit_message_text(f"📂 Выберите список для просмотра:\n\n{summary}", ADMIN_ID, call.message.message_id, reply_markup=markup)
+            bot.edit_message_text(f"📂 Выберите список для просмотра:\n\n{summary}", chat_id, call.message.message_id, reply_markup=markup)
             return
         if call.data == 'admin_lists_set_min':
             msg = bot.edit_message_text(
-                "Введите минимальное число пользователей для показа в меню '📋 Списки ботов' (целое число):",
-                ADMIN_ID,
-                call.message.message_id,
+                "Введите минимальное число пользователей для показа в меню '📋 Списки ботов' (целое число):", chat_id, call.message.message_id,
                 reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_lists_menu"))
             )
-            set_user_state(ADMIN_ID, {'action': 'admin_change_setting', 'setting_key': 'bots_list_min_users', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+            set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'bots_list_min_users', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
             return
         # Удалено: отдельное управление списками через список. Используйте "Управление по ID".
         # Новый режим: управление по введенному ID
         if call.data == 'admin_list_byid_start':
             msg = bot.edit_message_text(
-                "Введите ID бота для управления закрепом/скрытием/ручным добавлением:",
-                ADMIN_ID,
-                call.message.message_id,
+                "Введите ID бота для управления закрепом/скрытием/ручным добавлением:", chat_id, call.message.message_id,
                 reply_markup=types.InlineKeyboardMarkup().add(
                     types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_lists_menu")
                 )
             )
-            set_user_state(ADMIN_ID, {
+            set_user_state(user_id, {
                 'action': 'admin_lists_by_id_input',
                 'message_id': msg.message_id,
                 'call_id': call.id,
@@ -3572,9 +3569,9 @@ def handle_admin_callbacks(call):
                 m.add(types.InlineKeyboardButton("⤴️ Ввести другой ID", callback_data="admin_list_byid_start"))
                 m.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_lists_menu"))
                 try:
-                    bot.edit_message_text(text, ADMIN_ID, call.message.message_id, parse_mode="HTML", reply_markup=m)
+                    bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=m)
                 except telebot.apihelper.ApiTelegramException:
-                    bot.send_message(ADMIN_ID, text, parse_mode="HTML", reply_markup=m)
+                    bot.send_message(chat_id, text, parse_mode="HTML", reply_markup=m)
 
             try:
                 if len(parts_local) == 4 and parts_local[3].isdigit():
@@ -3649,9 +3646,9 @@ def handle_admin_callbacks(call):
                     pass
                 call.data = f'admin_list_view_{bid}'; handle_admin_callbacks(call); return
             if call.data.startswith("admin_list_add_manual"):
-                msg = bot.edit_message_text("Введите ID бота, который нужно ДОБАВИТЬ в списки вручную:", ADMIN_ID, call.message.message_id,
+                msg = bot.edit_message_text("Введите ID бота, который нужно ДОБАВИТЬ в списки вручную:", chat_id, call.message.message_id,
                                             reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_lists_menu")))
-                set_user_state(ADMIN_ID, {'action': 'admin_lists_add_manual', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+                set_user_state(user_id, {'action': 'admin_lists_add_manual', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
                 return
             try:
                 bid = int(parts[-1])
@@ -3839,7 +3836,7 @@ def handle_admin_callbacks(call):
             start_bot_process(bot_id)
             
             bot.answer_callback_query(call.id, f"✅ Лимит для бота #{bot_id} изменен и бот перезапущен.", show_alert=True)
-            bot.edit_message_text(call.message.html_text + f"\n\n<b>Статус: ✅ ОДОБРЕНО (лимит {new_limit})</b>", ADMIN_ID, call.message.message_id, parse_mode="HTML")
+            bot.edit_message_text(call.message.html_text + f"\n\n<b>Статус: ✅ ОДОБРЕНО (лимит {new_limit})</b>", chat_id, call.message.message_id, parse_mode="HTML")
             try:
                 bot.send_message(bot_info['owner_id'], f"✅ Администратор одобрил смену лимита Flyer для вашего бота #{bot_id} на <b>{new_limit}</b>. Бот был автоматически перезапущен.", parse_mode="HTML")
             except Exception as e:
@@ -3849,7 +3846,7 @@ def handle_admin_callbacks(call):
         elif sub_action == "decline":
             target_user_id = int(parts[4])
             bot.answer_callback_query(call.id, "Запрос отклонен.", show_alert=True)
-            bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", ADMIN_ID, call.message.message_id, parse_mode="HTML")
+            bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
             try:
                 bot.send_message(target_user_id, f"❌ Ваша заявка на изменение лимита Flyer для бота #{bot_id} была отклонена.")
             except Exception as e:
@@ -3872,55 +3869,51 @@ def handle_admin_callbacks(call):
             markup.add(types.InlineKeyboardButton(f"💰 Изменить цену VIP ({vip_price} ₽)", callback_data="admin_vip_set_price"))
             markup.add(types.InlineKeyboardButton("🎁 Выдать VIP", callback_data="admin_vip_grant"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
-            bot.edit_message_text("₽ Управление VIP-статусом:", ADMIN_ID, call.message.message_id, reply_markup=markup)
+            bot.edit_message_text("₽ Управление VIP-статусом:", chat_id, call.message.message_id, reply_markup=markup)
         
         elif sub_action == "set" and parts[3] == "price":
-            msg = bot.edit_message_text("Введите новую цену для VIP-статуса (например, 120.0):", ADMIN_ID, call.message.message_id,
+            msg = bot.edit_message_text("Введите новую цену для VIP-статуса (например, 120.0):", chat_id, call.message.message_id,
                                         reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_vip_manage")))
-            set_user_state(ADMIN_ID, {'action': 'admin_change_setting', 'setting_key': 'vip_price', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+            set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'vip_price', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
         
         elif sub_action == "grant":
             cancel_markup = types.InlineKeyboardMarkup().add(
                 types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_vip_manage")
             )
             msg = bot.edit_message_text(
-                "Введите ID бота, которому нужно выдать VIP:", 
-                ADMIN_ID, 
-                call.message.message_id,
+                "Введите ID бота, которому нужно выдать VIP:", chat_id, call.message.message_id,
                 reply_markup=cancel_markup
             )
-            set_user_state(ADMIN_ID, {'action': 'admin_grant_vip', 'message_id': msg.message_id, 'call_id': call.id})
+            set_user_state(user_id, {'action': 'admin_grant_vip', 'message_id': msg.message_id, 'call_id': call.id})
         return
     
     # Удалено: админ-меню 'Креатор'
 
     if action == "back":
-        bot.edit_message_text(get_custom_text('admin_menu_heading'), ADMIN_ID, call.message.message_id, reply_markup=create_admin_menu())
+        bot.edit_message_text(get_custom_text('admin_menu_heading'), chat_id, call.message.message_id, reply_markup=create_admin_menu())
 
     elif action == "get" and parts[2] == "logs" and parts[3] == "start":
         cancel_markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад в админку", callback_data="admin_back"))
         msg = bot.edit_message_text(
-            "<b>Введите ID бота, логи которого вы хотите получить:</b>", 
-            ADMIN_ID, 
-            call.message.message_id,
+            "<b>Введите ID бота, логи которого вы хотите получить:</b>", chat_id, call.message.message_id,
             reply_markup=cancel_markup,
             parse_mode="HTML"
         )
-        set_user_state(ADMIN_ID, {'action': 'awaiting_bot_id_for_logs', 'message_id': msg.message_id})
+        set_user_state(user_id, {'action': 'awaiting_bot_id_for_logs', 'message_id': msg.message_id})
 
     elif action == "broadcast" and not (len(parts) >= 3 and parts[2] == "bots"):
         sub_action = parts[2]
         if sub_action == "start":
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Отмена", callback_data="admin_back"))
-            msg = bot.edit_message_text("<b>Шаг 1/3:</b> Отправьте мне готовый пост (с текстом, фото и т.д.), который нужно разослать.", ADMIN_ID, call.message.message_id, reply_markup=markup, parse_mode="HTML")
-            set_user_state(ADMIN_ID, {'action': 'admin_broadcast_get_content', 'message_id': msg.message_id})
+            msg = bot.edit_message_text("<b>Шаг 1/3:</b> Отправьте мне готовый пост (с текстом, фото и т.д.), который нужно разослать.", chat_id, call.message.message_id, reply_markup=markup, parse_mode="HTML")
+            set_user_state(user_id, {'action': 'admin_broadcast_get_content', 'message_id': msg.message_id})
         elif sub_action == "cancel":
-            if ADMIN_ID in user_states: del user_states[ADMIN_ID]
-            bot.delete_message(ADMIN_ID, call.message.message_id)
-            bot.send_message(ADMIN_ID, "Рассылка отменена.", reply_markup=create_main_menu(ADMIN_ID))
+            if user_id in user_states: del user_states[user_id]
+            bot.delete_message(chat_id, call.message.message_id)
+            bot.send_message(chat_id, "Рассылка отменена.", reply_markup=create_main_menu(user_id))
         elif sub_action == "confirm":
-            message_to_send = bot.send_message(ADMIN_ID, "🚀 Рассылка запущена...")
-            try: bot.delete_message(ADMIN_ID, call.message.message_id)
+            message_to_send = bot.send_message(chat_id, "🚀 Рассылка запущена...")
+            try: bot.delete_message(chat_id, call.message.message_id)
             except: pass
             preview_message_id = int(parts[3])
             def run_broadcast_thread():
@@ -3928,18 +3921,18 @@ def handle_admin_callbacks(call):
                 success_count, fail_count, total_users = 0, 0, len(users_to_send)
                 start_time = time.time()
                 try:
-                    copied_message = bot.copy_message(ADMIN_ID, ADMIN_ID, preview_message_id)
+                    copied_message = bot.copy_message(chat_id, chat_id, preview_message_id)
                     reply_markup_to_send = copied_message.reply_markup
-                    bot.delete_message(ADMIN_ID, copied_message.message_id)
+                    bot.delete_message(chat_id, copied_message.message_id)
                 except Exception: reply_markup_to_send = None
                 for i, user in enumerate(users_to_send):
                     try:
-                        bot.copy_message(user['user_id'], ADMIN_ID, preview_message_id, reply_markup=reply_markup_to_send)
+                        bot.copy_message(user['user_id'], chat_id, preview_message_id, reply_markup=reply_markup_to_send)
                         success_count += 1
                     except Exception: fail_count += 1
                     time.sleep(0.05) 
                     if (i + 1) % 20 == 0:
-                        try: bot.edit_message_text(f"🚀 Рассылка... Отправлено {i+1}/{total_users}", ADMIN_ID, message_to_send.message_id)
+                        try: bot.edit_message_text(f"🚀 Рассылка... Отправлено {i+1}/{total_users}", chat_id, message_to_send.message_id)
                         except telebot.apihelper.ApiTelegramException: pass
                 end_time = time.time()
                 final_text = (f"✅ Рассылка завершена за {end_time - start_time:.2f} сек.\n\n"
@@ -3947,7 +3940,7 @@ def handle_admin_callbacks(call):
                               f"👍 Успешно отправлено: {success_count}\n"
                               f"👎 Ошибок: {fail_count}")
                 final_markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад в админку", callback_data="admin_back"))
-                bot.edit_message_text(final_text, ADMIN_ID, message_to_send.message_id, reply_markup=final_markup)
+                bot.edit_message_text(final_text, chat_id, message_to_send.message_id, reply_markup=final_markup)
             threading.Thread(target=run_broadcast_thread, daemon=True).start()
 
     elif call.data == "admin_broadcast_bots_confirm":
@@ -3955,16 +3948,16 @@ def handle_admin_callbacks(call):
         if bots_broadcast_running:
             bot.answer_callback_query(call.id, "❌ Уже идет рассылка по ботам. Дождитесь завершения.", show_alert=True)
             return
-        state = user_states.get(ADMIN_ID, {})
+        state = user_states.get(user_id, {})
         target_bot_ids = state.get('target_bot_ids') or []
         if not target_bot_ids:
             bot.answer_callback_query(call.id)
-            bot.send_message(ADMIN_ID, "❌ Не выбраны боты для рассылки.")
+            bot.send_message(chat_id, "❌ Не выбраны боты для рассылки.")
             return
         # lock and run
         bots_broadcast_running = True
         bot.answer_callback_query(call.id)
-        progress_msg = bot.send_message(ADMIN_ID, "🚀 Запускаю рассылку по выбранным ботам (очередью)...")
+        progress_msg = bot.send_message(chat_id, "🚀 Запускаю рассылку по выбранным ботам (очередью)...")
         preview_msg_id = state.get('preview_message_id')
         reply_markup_to_send = state.get('reply_markup')
 
@@ -3996,7 +3989,7 @@ def handle_admin_callbacks(call):
                     sent, skipped = 0, 0
                     for ur in users_rows:
                         try:
-                            bot.copy_message(ur['user_id'], ADMIN_ID, preview_id, reply_markup=reply_markup)
+                            bot.copy_message(ur['user_id'], chat_id, preview_id, reply_markup=reply_markup)
                             sent += 1
                         except Exception:
                             skipped += 1
@@ -4004,15 +3997,15 @@ def handle_admin_callbacks(call):
                     ok += 1
                 except Exception:
                     fail += 1
-                if (idx + 1) % 1 == 0:
-                    try:
-                        bot.edit_message_text(f"🚀 Рассылка по ботам... {idx+1}/{total_bots}", ADMIN_ID, progress_msg.message_id)
-                    except Exception:
-                        pass
+                    if (idx + 1) % 1 == 0:
+                        try:
+                            bot.edit_message_text(f"🚀 Рассылка по ботам... {idx+1}/{total_bots}", chat_id, progress_msg.message_id)
+                        except Exception:
+                            pass
             dur = time.time() - start_ts
             bots_broadcast_running = False
             try:
-                bot.edit_message_text(f"✅ Готово. Ботов обработано: {ok}/{total_bots}. Ошибок: {fail}. Время: {dur:.1f} сек.", ADMIN_ID, progress_msg.message_id,
+                bot.edit_message_text(f"✅ Готово. Ботов обработано: {ok}/{total_bots}. Ошибок: {fail}. Время: {dur:.1f} сек.", chat_id, progress_msg.message_id,
                                       reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back")))
             except Exception:
                 pass
@@ -4028,7 +4021,7 @@ def handle_admin_callbacks(call):
             current_min = get_setting('bots_list_min_users') or '30'
             markup.add(types.InlineKeyboardButton(f"⚙️ Порог для 'Списков ботов' ({current_min})", callback_data="admin_lists_set_min"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
-            bot.edit_message_text("📂 Выберите список для просмотра:", ADMIN_ID, call.message.message_id, reply_markup=markup)
+            bot.edit_message_text("📂 Выберите список для просмотра:", chat_id, call.message.message_id, reply_markup=markup)
         elif sub_action == "op":
             bots_list = db_execute(
                 "SELECT id, bot_username, owner_id, bot_type FROM bots "
@@ -4038,17 +4031,15 @@ def handle_admin_callbacks(call):
             )
             text = "<b>🤖 Боты с подключенным Flyer ОП:</b>\n\n" + ('\n'.join([f"- ID: <code>{b['id']}</code> (@{escape(b['bot_username'] or 'N/A')}) | Владелец: <code>{b['owner_id']}</code> | 👥 {get_child_bot_user_count(b['id'], b['bot_type'])}" for b in bots_list]) or "Список пуст.")
             markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад к спискам", callback_data="admin_lists_menu"))
-            bot.edit_message_text(text, ADMIN_ID, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+            bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
         # Удален подраздел "creator" (Пользователи конструктора)
         elif sub_action == "set":
             if len(parts) >= 4 and parts[3] in ('min', 'min_users'):
                 msg = bot.edit_message_text(
-                    "Введите минимальное число пользователей для показа в меню '📋 Списки ботов' (целое число):",
-                    ADMIN_ID,
-                    call.message.message_id,
+                    "Введите минимальное число пользователей для показа в меню '📋 Списки ботов' (целое число):", chat_id, call.message.message_id,
                     reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_lists_menu"))
                 )
-                set_user_state(ADMIN_ID, {'action': 'admin_change_setting', 'setting_key': 'bots_list_min_users', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+                set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'bots_list_min_users', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
 
     elif action == "bots":
         sub_action = parts[2]
@@ -4092,7 +4083,7 @@ def handle_admin_callbacks(call):
         
         elif sub_action == "find":
             msg = bot.edit_message_text("<b>🔎 Введите ID бота для поиска:</b>", call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Отмена", callback_data="admin_bots_all")))
-            set_user_state(ADMIN_ID, {'action': 'admin_view_bot_by_id', 'message_id': msg.message_id})
+            set_user_state(user_id, {'action': 'admin_view_bot_by_id', 'message_id': msg.message_id})
             
     elif action == "bot":
         sub_action = parts[2]
@@ -4101,7 +4092,7 @@ def handle_admin_callbacks(call):
             show_admin_bot_info(call.from_user.id, call.message.message_id, bot_id)
         elif sub_action == "changekey":
             msg = bot.edit_message_text(f"<b>🔧 Введите новый Flyer API ключ для бота ID <code>{bot_id}</code>:</b>", call.message.chat.id, call.message.message_id, parse_mode="HTML", reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Отмена", callback_data=f"admin_bot_info_{bot_id}")))
-            set_user_state(ADMIN_ID, {'action': 'admin_set_new_op_key_admin', 'bot_id': bot_id, 'message_id': msg.message_id, 'call_id': call.id})
+            set_user_state(user_id, {'action': 'admin_set_new_op_key_admin', 'bot_id': bot_id, 'message_id': msg.message_id, 'call_id': call.id})
         elif sub_action == "removekey":
             bot_info = get_bot_by_id(bot_id)
             if bot_info['bot_type'] == 'ref':
@@ -4147,7 +4138,7 @@ def handle_admin_callbacks(call):
             markup.add(types.InlineKeyboardButton("✏️ Изменить приветствие креатора", callback_data="admin_edit_creator_welcome"))
             markup.add(types.InlineKeyboardButton("📊 Лимит бесплатных ботов", callback_data="admin_set_max_bots"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_back"))
-            bot.edit_message_text("⚙️ Управление настройками конструктора и доходом Flyer:", ADMIN_ID, call.message.message_id, reply_markup=markup)
+            bot.edit_message_text("⚙️ Управление настройками конструктора и доходом Flyer:", chat_id, call.message.message_id, reply_markup=markup)
         elif sub_action == "set":
             setting_type = parts[3]
             setting_key, prompt_text = None, None
@@ -4162,17 +4153,17 @@ def handle_admin_callbacks(call):
                 prompt_text = f"Текущая цена бота Креатор: {current_price} USDT.\n\nВведите новое значение:"
             if setting_key and prompt_text:
                 markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_op_manage"))
-                msg = bot.edit_message_text(prompt_text, ADMIN_ID, call.message.message_id, reply_markup=markup)
-                set_user_state(ADMIN_ID, {'action': 'admin_change_setting', 'setting_key': setting_key, 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+                msg = bot.edit_message_text(prompt_text, chat_id, call.message.message_id, reply_markup=markup)
+                set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': setting_key, 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
         elif call.data == "admin_edit_creator_welcome":
             prompt_custom_text_edit(user_id, 'creator_welcome', getattr(call.message, 'message_id', None), back_callback="admin_op_manage")
             bot.answer_callback_query(call.id)
             return
         elif call.data == "admin_set_max_bots":
             current_limit = get_setting('MAX_BOTS_PER_USER') or str(MAX_BOTS_PER_USER)
-            msg = bot.edit_message_text(f"📊 Текущий лимит бесплатных ботов: {current_limit}.\n\nВведите новое целое число:", ADMIN_ID, call.message.message_id,
+            msg = bot.edit_message_text(f"📊 Текущий лимит бесплатных ботов: {current_limit}.\n\nВведите новое целое число:", chat_id, call.message.message_id,
                                         reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ Назад", callback_data="admin_op_manage")))
-            set_user_state(ADMIN_ID, {'action': 'admin_change_setting', 'setting_key': 'MAX_BOTS_PER_USER', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
+            set_user_state(user_id, {'action': 'admin_change_setting', 'setting_key': 'MAX_BOTS_PER_USER', 'message_id': msg.message_id, 'call_id': call.id, 'message': call.message})
             return
         return
 
@@ -4185,12 +4176,12 @@ def handle_admin_callbacks(call):
             for wd in pending_wds:
                 markup.add(types.InlineKeyboardButton(f"Заявка #{wd['id']} - {wd['amount']:.2f} ₽ от {wd['user_id']}", callback_data=f"admin_wd_view_{wd['id']}"))
             markup.add(types.InlineKeyboardButton("⬅️ Назад в админку", callback_data="admin_back"))
-            bot.edit_message_text(text, ADMIN_ID, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+            bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
             return
         wd_id = int(parts[3])
         if wd_action == "view":
             wd_info = db_execute("SELECT * FROM creator_withdrawals WHERE id = ?", (wd_id,), fetchone=True)
-            if not wd_info: bot.edit_message_text("Заявка не найдена.", ADMIN_ID, call.message.message_id); return
+            if not wd_info: bot.edit_message_text("Заявка не найдена.", chat_id, call.message.message_id); return
             user_info = get_user(wd_info['user_id'])
             username = escape(user_info['username'] or "N/A")
             text = (f"<b>📬 Заявка на вывод №{wd_id}</b>\n\n"
@@ -4203,7 +4194,7 @@ def handle_admin_callbacks(call):
                 markup.row(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"admin_wd_approve_{wd_id}_{wd_info['user_id']}"), types.InlineKeyboardButton("❌ Отклонить", callback_data=f"admin_wd_decline_{wd_id}_{wd_info['user_id']}"))
                 markup.row(types.InlineKeyboardButton("💬 Ответить пользователю", callback_data=f"admin_wd_reply_{wd_id}_{wd_info['user_id']}"))
             markup.add(types.InlineKeyboardButton("⬅️ К списку заявок", callback_data="admin_wd_list"))
-            bot.edit_message_text(text, ADMIN_ID, call.message.message_id, parse_mode="HTML", reply_markup=markup)
+            bot.edit_message_text(text, chat_id, call.message.message_id, parse_mode="HTML", reply_markup=markup)
             return
         target_user_id = int(parts[4])
         wd_info = db_execute("SELECT * FROM creator_withdrawals WHERE id = ?", (wd_id,), fetchone=True)
@@ -4219,8 +4210,8 @@ def handle_admin_callbacks(call):
             db_execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (wd_info['amount'], target_user_id), commit=True)
             bot.send_message(target_user_id, f"❌ Ваша заявка на вывод {wd_info['amount']:.2f} ₽ отклонена. Средства возвращены на баланс.")
         elif wd_action == 'reply':
-            msg = bot.send_message(ADMIN_ID, f"Введите текст сообщения для пользователя {target_user_id}:", reply_markup=create_cancel_markup())
-            set_user_state(ADMIN_ID, {'action': 'admin_reply_text', 'target_user_id': target_user_id, 'bot_id': None, 'message_id': msg.message_id, 'call_id': call.id})
+            msg = bot.send_message(chat_id, f"Введите текст сообщения для пользователя {target_user_id}:", reply_markup=create_cancel_markup())
+            set_user_state(user_id, {'action': 'admin_reply_text', 'target_user_id': target_user_id, 'bot_id': None, 'message_id': msg.message_id, 'call_id': call.id})
             return
         call.data = f"admin_wd_view_{wd_id}"; handle_admin_callbacks(call)
 
@@ -5277,30 +5268,29 @@ if __name__ == '__main__':
                     bot.edit_message_text("⏳ Ваша заявка на рассмотрении. Администратор скоро с вами свяжется.", user_id, call.message.message_id)
 
                 elif action in ['approve', 'decline', 'reply']:
-                    if user_id != ADMIN_ID: return
                     target_user_id = int(parts[4])
                     
                     if action == 'approve':
                         bot.answer_callback_query(call.id)
-                        msg = bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", ADMIN_ID, call.message.message_id, parse_mode="HTML")
-                        set_user_state(ADMIN_ID, {
+                        msg = bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        set_user_state(user_id, {
                             'action': 'admin_set_flyer_key', 'bot_id': bot_id, 'target_user_id': target_user_id,
                             'message_id': msg.message_id, 'original_text': call.message.html_text
                         })
-                        bot.send_message(ADMIN_ID, f"🔑 Введите Flyer API ключ для бота #{bot_id}:", reply_markup=create_cancel_markup())
+                        bot.send_message(chat_id, f"🔑 Введите Flyer API ключ для бота #{bot_id}:", reply_markup=create_cancel_markup())
 
                     elif action == 'decline':
                         bot.send_message(target_user_id, f"❌ Ваша заявка на подключение Flyer для бота #{bot_id} была *отклонена*.")
-                        bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", ADMIN_ID, call.message.message_id, parse_mode="HTML")
+                        bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
                         bot.answer_callback_query(call.id)
                     
                     elif action == 'reply':
                         bot.answer_callback_query(call.id)
-                        set_user_state(ADMIN_ID, {
+                        set_user_state(user_id, {
                             'action': 'admin_reply_text', 'target_user_id': target_user_id, 'bot_id': bot_id,
                             'message_id': call.message.message_id, 'call_id': call.id
                         })
-                        bot.send_message(ADMIN_ID, "Введите текст сообщения для пользователя:", reply_markup=create_cancel_markup())
+                        bot.send_message(chat_id, "Введите текст сообщения для пользователя:", reply_markup=create_cancel_markup())
                 return
 
             if call.data == "dummy": bot.answer_callback_query(call.id); return
@@ -5478,7 +5468,7 @@ if __name__ == '__main__':
                 if not bot_info:
                     bot.answer_callback_query(call.id, "❌ Бот не найден.", show_alert=True)
                     return
-                if user_id != ADMIN_ID and user_id != bot_info['owner_id']:
+                if not is_admin(user_id) and user_id != bot_info['owner_id']:
                     bot.answer_callback_query(call.id, "❌ Только владелец или админ могут удалять бота.", show_alert=True)
                     return
                 delete_bot_from_db(bot_id)
