@@ -3843,7 +3843,7 @@ def handle_admin_callbacks(call):
             start_bot_process(bot_id)
             
             bot.answer_callback_query(call.id, f"✅ Лимит для бота #{bot_id} изменен и бот перезапущен.", show_alert=True)
-            bot.edit_message_text(call.message.html_text + f"\n\n<b>Статус: ✅ ОДОБРЕНО (лимит {new_limit})</b>", chat_id, call.message.message_id, parse_mode="HTML")
+            bot.edit_message_text(escape(call.message.text) + f"\n\n<b>Статус: ✅ ОДОБРЕНО (лимит {new_limit})</b>", chat_id, call.message.message_id, parse_mode="HTML")
             try:
                 bot.send_message(bot_info['owner_id'], f"✅ Администратор одобрил смену лимита Flyer для вашего бота #{bot_id} на <b>{new_limit}</b>. Бот был автоматически перезапущен.", parse_mode="HTML")
             except Exception as e:
@@ -3853,7 +3853,7 @@ def handle_admin_callbacks(call):
         elif sub_action == "decline":
             target_user_id = int(parts[4])
             bot.answer_callback_query(call.id, "Запрос отклонен.", show_alert=True)
-            bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
+            bot.edit_message_text(escape(call.message.text) + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
             try:
                 bot.send_message(target_user_id, f"❌ Ваша заявка на изменение лимита Flyer для бота #{bot_id} была отклонена.")
             except Exception as e:
@@ -5285,16 +5285,16 @@ if __name__ == '__main__':
                     
                     if action == 'approve':
                         bot.answer_callback_query(call.id)
-                        msg = bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        msg = bot.edit_message_text(escape(call.message.text) + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", chat_id, call.message.message_id, parse_mode="HTML")
                         set_user_state(user_id, {
                             'action': 'admin_set_flyer_key', 'bot_id': bot_id, 'target_user_id': target_user_id,
-                            'message_id': msg.message_id, 'original_text': call.message.html_text
+                            'message_id': msg.message_id, 'original_text': escape(call.message.text)
                         })
                         bot.send_message(chat_id, f"🔑 Введите Flyer API ключ для бота #{bot_id}:", reply_markup=create_cancel_markup())
 
                     elif action == 'decline':
                         bot.send_message(target_user_id, f"❌ Ваша заявка на подключение Flyer для бота #{bot_id} была *отклонена*.")
-                        bot.edit_message_text(call.message.html_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        bot.edit_message_text(escape(call.message.text) + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
                         bot.answer_callback_query(call.id)
                     
                     elif action == 'reply':
