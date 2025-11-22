@@ -31,6 +31,16 @@ pip install pyTelegramBotAPI psutil aiocryptopay
 python3 creator_updated_fixed.py
 ```
 
+## 5. Исправлена ошибка "name 'chat_id' is not defined" в кнопке одобрения Flyer
+**Проблема:** При нажатии на кнопку "✅ Одобрить" для заявки на подключение Flyer возникала критическая ошибка:
+```
+2025-11-22 19:01:54,489 - CRITICAL - Критическая ошибка в callback: name 'chat_id' is not defined
+```
+
+**Причина:** В обработчике callback `handle_callback_query` использовалась неопределенная переменная `chat_id`.
+
+**Решение:** Заменена переменная `chat_id` на `user_id` в четырех местах обработчика flyer_op (строки 5575, 5580, 5596, 5605).
+
 ## Примечания:
 - Убедитесь, что токены бота и Crypto Pay правильно настроены в файле
 - Проверьте, что ADMIN_ID соответствует вашему Telegram ID
