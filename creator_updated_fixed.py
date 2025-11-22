@@ -3842,8 +3842,14 @@ def handle_admin_callbacks(call):
             time.sleep(1)
             start_bot_process(bot_id)
             
-            bot.answer_callback_query(call.id, f"✅ Лимит для бота #{bot_id} изменен и бот перезапущен.", show_alert=True)
-            bot.edit_message_text(escape(call.message.text) + f"\n\n<b>Статус: ✅ ОДОБРЕНО (лимит {new_limit})</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                    bot.answer_callback_query(call.id, f"✅ Лимит для бота #{bot_id} изменен и бот перезапущен.", show_alert=True)
+            
+            text = (f"🚨 <b>Запрос на изменение лимита Flyer!</b>\n\n"
+                    f"<b>Бот:</b> @{escape(bot_info['bot_username'] or 'N/A')} (ID: <code>{bot_id}</code>)\n"
+                    f"<b>Владелец:</b> <code>{bot_info['owner_id']}</code>\n\n"
+                    f"Новый лимит: <b>{new_limit}</b>")
+                    
+            bot.edit_message_text(text + f"\n\n<b>Статус: ✅ ОДОБРЕНО (лимит {new_limit})</b>", chat_id, call.message.message_id, parse_mode="HTML")
             try:
                 bot.send_message(bot_info['owner_id'], f"✅ Администратор одобрил смену лимита Flyer для вашего бота #{bot_id} на <b>{new_limit}</b>. Бот был автоматически перезапущен.", parse_mode="HTML")
             except Exception as e:
@@ -3853,7 +3859,14 @@ def handle_admin_callbacks(call):
         elif sub_action == "decline":
             target_user_id = int(parts[4])
             bot.answer_callback_query(call.id, "Запрос отклонен.", show_alert=True)
-            bot.edit_message_text(escape(call.message.text) + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
+            
+            bot_info = get_bot_by_id(bot_id)
+            text = (f"🚨 <b>Запрос на изменение лимита Flyer!</b>\n\n"
+                    f"<b>Бот:</b> @{escape(bot_info['bot_username'] or 'N/A')} (ID: <code>{bot_id}</code>)\n"
+                    f"<b>Владелец:</b> <code>{bot_info['owner_id']}</code>\n\n"
+                    f"Запрос отклонен.")
+                    
+            bot.edit_message_text(text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
             try:
                 bot.send_message(target_user_id, f"❌ Ваша заявка на изменение лимита Flyer для бота #{bot_id} была отклонена.")
             except Exception as e:
