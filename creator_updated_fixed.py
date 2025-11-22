@@ -253,6 +253,18 @@ def row_to_dict(record):
         return {key: record[key] for key in record.keys()}
     return record
 
+def extract_username(user_record, default_value=None):
+    """
+    Safely extract username from user records (dict/sqlite row), returning default when missing.
+    """
+    if not user_record:
+        return default_value
+    try:
+        username = user_record['username']
+    except (TypeError, KeyError):
+        username = None
+    return username or default_value
+
 def is_admin(user_id: int) -> bool:
     try:
         return int(user_id) in set(int(x) for x in ADMIN_IDS)
@@ -4788,7 +4800,8 @@ if __name__ == '__main__':
                                         # Уведомляем администратора о покупке
                                         try:
                                             buyer = get_user(owner_id_new)
-                                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice.invoice_id}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
+                                            buyer_username = extract_username(buyer, default_value='N/A')
+                                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer_username)}) оплатил счет #{invoice.invoice_id}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
                                         except Exception as e:
                                             logging.warning(f"Не удалось уведомить админа о фоновой покупке CashLait: {e}")
                                     elif invoice.payload.startswith('creator_new_'):
@@ -4804,7 +4817,8 @@ if __name__ == '__main__':
                                         # Уведомляем администратора о покупке
                                         try:
                                             buyer = get_user(owner_id_new)
-                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
+                                            buyer_username = extract_username(buyer, default_value='N/A')
+                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_new}</code> (@{escape(buyer_username)}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
                                         except Exception as e:
                                             logging.warning(f"Не удалось уведомить админа о фоновой покупке Креатора: {e}")
                                     elif invoice.payload.startswith('creator_'):
@@ -4820,7 +4834,8 @@ if __name__ == '__main__':
                                         # Уведомляем администратора
                                         try:
                                             buyer = get_user(owner_id_existing)
-                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_existing}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
+                                            buyer_username = extract_username(buyer, default_value='N/A')
+                                            bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора (фон): пользователь <code>{owner_id_existing}</code> (@{escape(buyer_username)}) оплатил счет #{invoice.invoice_id}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
                                         except Exception as e:
                                             logging.warning(f"Не удалось уведомить админа о фоновой покупке Креатора (existing): {e}")
                 except Exception as e:
@@ -5325,7 +5340,8 @@ if __name__ == '__main__':
                                                   reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ В меню ботов", callback_data="back_to_bots_list")))
                             try:
                                 buyer = get_user(user_id)
-                                bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора: пользователь <code>{user_id}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice_id_to_check}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
+                                buyer_username = extract_username(buyer, default_value='N/A')
+                                bot.send_message(ADMIN_ID, f"🛒 Покупка Креатора: пользователь <code>{user_id}</code> (@{escape(buyer_username)}) оплатил счет #{invoice_id_to_check}. Создан бот #{creator_bot_id}.", parse_mode="HTML")
                             except Exception as e:
                                 logging.warning(f"Не удалось уведомить админа о покупке Креатора: {e}")
                         else:
@@ -5350,7 +5366,8 @@ if __name__ == '__main__':
                                               reply_markup=types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("⬅️ В меню ботов", callback_data="back_to_bots_list")))
                         try:
                             buyer = get_user(user_id)
-                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait: пользователь <code>{user_id}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice_id_to_check}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
+                            buyer_username = extract_username(buyer, default_value='N/A')
+                            bot.send_message(ADMIN_ID, f"🛒 Покупка CashLait: пользователь <code>{user_id}</code> (@{escape(buyer_username)}) оплатил счет #{invoice_id_to_check}. Создан бот #{cashlait_bot_id}.", parse_mode="HTML")
                         except Exception as e:
                             logging.warning(f"Не удалось уведомить админа о покупке CashLait: {e}")
                     else:
@@ -5379,9 +5396,10 @@ if __name__ == '__main__':
                         )
                         try:
                             buyer = get_user(user_id)
+                            buyer_username = extract_username(buyer, default_value='N/A')
                             bot.send_message(
                                 ADMIN_ID,
-                                f"🛒 Покупка DiceLite: пользователь <code>{user_id}</code> (@{escape(buyer['username'] or 'N/A')}) оплатил счет #{invoice_id_to_check}. Создан бот #{dicelite_bot_id}.",
+                                f"🛒 Покупка DiceLite: пользователь <code>{user_id}</code> (@{escape(buyer_username)}) оплатил счет #{invoice_id_to_check}. Создан бот #{dicelite_bot_id}.",
                                 parse_mode="HTML"
                             )
                         except Exception as e:
