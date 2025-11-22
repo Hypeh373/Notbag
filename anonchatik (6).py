@@ -10,6 +10,7 @@ from html import escape
 
 # Укажите @username конструктора; при желании можно переопределить через переменную окружения CREATOR_USERNAME.
 CREATOR_USERNAME = os.getenv('CREATOR_USERNAME', '@GrillCreate_bot').strip() or '@GrillCreate_bot'
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # BOT_ID передается как аргумент командной строки
 BOT_ID = int(sys.argv[1]) if len(sys.argv) > 1 else None
@@ -17,8 +18,10 @@ if BOT_ID is None:
     print("ОШИБКА: BOT_ID не передан! Использование: python anonchatik.py <bot_id>")
     sys.exit(1)
 
-# Путь к БД Creator
-CREATOR_DB_PATH = 'creator_data2.db'
+# Путь к БД Creator (может быть переопределён переменной окружения CREATOR_DB_PATH)
+DEFAULT_CREATOR_DB_PATH = os.path.join(BASE_DIR, 'creator_data2.db')
+CREATOR_DB_PATH = os.getenv('CREATOR_DB_PATH', DEFAULT_CREATOR_DB_PATH).strip() or DEFAULT_CREATOR_DB_PATH
+CREATOR_DB_PATH = os.path.abspath(CREATOR_DB_PATH)
 _CREATOR_BOTS_COLUMNS_CACHE = None
 _CREATOR_MISSING_COLUMN_WARNINGS = set()
 
