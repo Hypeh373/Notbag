@@ -17,6 +17,7 @@ import json
 import logging
 import os
 import sqlite3
+import sys
 import threading
 import time
 from dataclasses import dataclass
@@ -34,6 +35,118 @@ from telebot.apihelper import ApiException
 
 DEFAULT_CONSTRUCTOR_USERNAME = "MinxoCreate_bot"
 DEFAULT_CREATOR_BRANDING_LINK = f"https://t.me/{DEFAULT_CONSTRUCTOR_USERNAME}"
+CREATOR_DB_PATH = os.getenv(
+    "CREATOR_DB_PATH",
+    os.path.join(os.path.dirname(__file__), "creator_data2.db"),
+)
+
+_BOOLEAN_TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled", "y"}
+_BOOLEAN_FALSE_VALUES = {"0", "false", "no", "off", "disable", "disabled", "n"}
+
+
+def _clean_text(value: Any) -> str:
+    if value is None:
+        return ""
+    return str(value).strip()
+
+
+def _bool_from_raw(value: Any) -> Optional[bool]:
+    if isinstance(value, bool):
+        return value
+    text = _clean_text(value).lower()
+    if not text:
+        return None
+    if text in _BOOLEAN_TRUE_VALUES:
+        return True
+    if text in _BOOLEAN_FALSE_VALUES:
+        return False
+    return None
+
+
+def _safe_int(value: Any) -> Optional[int]:
+    if value is None:
+        return None
+    try:
+        return int(str(value).strip())
+    except (TypeError, ValueError):
+        return None
+
+
+def _detect_creator_bot_id() -> Optional[int]:
+    candidates: List[Optional[str]] = [
+        os.getenv("CREATOR_BOT_ID"),
+        os.getenv("BOT_ID"),
+    ]
+    if len(sys.argv) > 1:
+        candidates.append(sys.argv[1])
+    for candidate in candidates:
+        parsed = _safe_int(candidate)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _load_creator_settings(keys: Iterable[str]) -> Dict[str, str]:
+    unique_keys = [key for key in dict.fromkeys(keys) if key]
+    if not unique_keys or not CREATOR_DB_PATH or not os.path.exists(CREATOR_DB_PATH):
+        return {}
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(CREATOR_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        placeholders = ", ".join("?" for _ in unique_keys)
+        cur = conn.execute(
+            f"SELECT key, value FROM settings WHERE key IN ({placeholders})",
+            tuple(unique_keys),
+        )
+        result: Dict[str, str] = {}
+        for row in cur.fetchall():
+            key = row["key"]
+            value = _clean_text(row["value"])
+            if key and value:
+                result[str(key)] = value
+        return result
+    except sqlite3.Error:
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+def _load_creator_bot_meta(bot_id: Optional[int]) -> Dict[str, Any]:
+    if not bot_id or not CREATOR_DB_PATH or not os.path.exists(CREATOR_DB_PATH):
+        return {}
+    conn: Optional[sqlite3.Connection] = None
+    try:
+        conn = sqlite3.connect(CREATOR_DB_PATH)
+        conn.row_factory = sqlite3.Row
+        cur = conn.execute("SELECT vip_status FROM bots WHERE id = ?", (bot_id,))
+        row = cur.fetchone()
+        if not row:
+            return {}
+        return dict(row)
+    except sqlite3.Error:
+        return {}
+    finally:
+        if conn:
+            conn.close()
+
+
+CREATOR_BOT_ID = _detect_creator_bot_id()
+_CREATOR_BRANDING_SETTINGS = _load_creator_settings(
+    (
+        "custom_text_constructor_bot_link",
+        "custom_text_constructor_bot_link_text",
+    )
+)
+CREATOR_BRANDING_LINK_FROM_SETTINGS = _clean_text(
+    _CREATOR_BRANDING_SETTINGS.get("custom_text_constructor_bot_link")
+)
+CREATOR_BRANDING_LABEL_FROM_SETTINGS = _clean_text(
+    _CREATOR_BRANDING_SETTINGS.get("custom_text_constructor_bot_link_text")
+)
+CREATOR_BOT_META = _load_creator_bot_meta(CREATOR_BOT_ID)
+_CREATOR_VIP_STATUS_RAW = CREATOR_BOT_META.get("vip_status")
 
 
 def _extract_username_from_link(value: Optional[str]) -> str:
@@ -88,11 +201,19 @@ def _build_creator_link(candidate: Optional[str], fallback_username: str) -> str
 
 # ⚠️ ВСТАВЬТЕ ВАШ ТОКЕН БОТА ОТ @BotFather:
 BOT_TOKEN = os.getenv("CASHLAIT_BOT_TOKEN", "8400644706:AAFjCQDxS73hvhizY4f3v94-vlXLkvqGHdQ")  # Например: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
-raw_constructor_username = (os.getenv("CONSTRUCTOR_BOT_USERNAME") or "").strip()
+raw_constructor_username = _clean_text(os.getenv("CONSTRUCTOR_BOT_USERNAME"))
+if not raw_constructor_username and CREATOR_BRANDING_LINK_FROM_SETTINGS:
+    derived_username = _extract_username_from_link(CREATOR_BRANDING_LINK_FROM_SETTINGS)
+    if derived_username:
+        raw_constructor_username = derived_username
 CONSTRUCTOR_BOT_USERNAME = raw_constructor_username.lstrip("@ ")
-creator_link_candidate = os.getenv("CREATOR_BRANDING_LINK")
+creator_link_candidate = _clean_text(os.getenv("CREATOR_BRANDING_LINK"))
 if not creator_link_candidate:
-    creator_link_candidate = os.getenv("CONSTRUCTOR_BOT_LINK")
+    creator_link_candidate = _clean_text(os.getenv("CONSTRUCTOR_BOT_LINK"))
+if not creator_link_candidate:
+    creator_link_candidate = _clean_text(os.getenv("CONSTRUCTOR_LINK_URL"))
+if not creator_link_candidate and CREATOR_BRANDING_LINK_FROM_SETTINGS:
+    creator_link_candidate = CREATOR_BRANDING_LINK_FROM_SETTINGS
 if not creator_link_candidate and CONSTRUCTOR_BOT_USERNAME:
     creator_link_candidate = f"https://t.me/{CONSTRUCTOR_BOT_USERNAME}"
 if not creator_link_candidate:
@@ -106,11 +227,20 @@ if derived_handle:
 if not CONSTRUCTOR_BOT_USERNAME:
     CONSTRUCTOR_BOT_USERNAME = DEFAULT_CONSTRUCTOR_USERNAME
 CREATOR_USERNAME_DEFAULT = f"@{CONSTRUCTOR_BOT_USERNAME}"
-raw_creator_label = os.getenv("CONSTRUCTOR_BOT_LABEL")
+constructor_link_text_env = _clean_text(os.getenv("CONSTRUCTOR_LINK_TEXT"))
+raw_creator_label = _clean_text(os.getenv("CONSTRUCTOR_BOT_LABEL"))
+if not raw_creator_label:
+    raw_creator_label = constructor_link_text_env or CREATOR_BRANDING_LABEL_FROM_SETTINGS
 if raw_creator_label:
-    CREATOR_CONTACT_LABEL_DEFAULT = raw_creator_label.strip()
+    CREATOR_CONTACT_LABEL_DEFAULT = raw_creator_label
 else:
     CREATOR_CONTACT_LABEL_DEFAULT = CREATOR_USERNAME_DEFAULT
+button_label_seed = (
+    constructor_link_text_env
+    or CREATOR_BRANDING_LABEL_FROM_SETTINGS
+    or CREATOR_CONTACT_LABEL_DEFAULT
+)
+CREATOR_CONTACT_BUTTON_LABEL_DEFAULT = button_label_seed or "🤖 Хочу такого же бота"
 LEGACY_CREATOR_LABELS = {
     "🤖 Хочу такого же бота",
     "Хочу такого же бота",
@@ -158,7 +288,7 @@ DEFAULT_SETTINGS: Dict[str, str] = {
     # Настройки брендинга конструктора
     "creator_contact_url": CONSTRUCTOR_BOT_LINK,
     "creator_contact_label": CREATOR_CONTACT_LABEL_DEFAULT,
-    "creator_contact_button_label": "🤖 Хочу такого же бота",
+    "creator_contact_button_label": CREATOR_CONTACT_BUTTON_LABEL_DEFAULT,
     "creator_branding_message": "🤖 Бот создан с помощью {label_html}",
     "creator_branding_enabled": "true",
     "vip_branding_disabled": "false",
@@ -308,7 +438,6 @@ def parse_decimal_input(text: str, quant: Decimal = DECIMAL_INPUT_QUANT) -> Deci
     return value.quantize(quant, rounding=ROUND_HALF_UP)
 
 
-_TRUE_VALUES = {"1", "true", "yes", "on", "enable", "enabled", "y"}
 _VIP_ENV_FLAGS = (
     "CASHLAIT_VIP_ACTIVE",
     "EXCHANGE_VIP_ACTIVE",
@@ -317,6 +446,8 @@ _VIP_ENV_FLAGS = (
     "VIP_BRANDING_DISABLED",
     "CREATOR_VIP_ACTIVE",
 )
+
+CREATOR_VIP_FLAG = _bool_from_raw(_CREATOR_VIP_STATUS_RAW)
 
 
 def _normalize_creator_link(value: Optional[str]) -> str:
@@ -353,7 +484,14 @@ def _creator_label_html(label: str, normalized_link: str) -> str:
 def _str_to_bool(value: Optional[str], default: bool = False) -> bool:
     if value is None:
         return default
-    return value.strip().lower() in _TRUE_VALUES
+    normalized = value.strip().lower()
+    if not normalized:
+        return default
+    if normalized in _BOOLEAN_TRUE_VALUES:
+        return True
+    if normalized in _BOOLEAN_FALSE_VALUES:
+        return False
+    return default
 
 
 def _env_flag(*names: str) -> Optional[bool]:
@@ -390,16 +528,18 @@ def get_creator_button_label() -> str:
     env_value = os.getenv("CREATOR_CONTACT_BUTTON_LABEL")
     if env_value:
         return env_value.strip()
-    setting_value = db.get_setting("creator_contact_button_label", "🤖 Хочу такого же бота")
+    setting_value = db.get_setting("creator_contact_button_label", CREATOR_CONTACT_BUTTON_LABEL_DEFAULT)
     if setting_value:
         return setting_value.strip()
-    return "🤖 Хочу такого же бота"
+    return CREATOR_CONTACT_BUTTON_LABEL_DEFAULT
 
 
 def is_vip_branding_disabled() -> bool:
     env_value = _env_flag(*_VIP_ENV_FLAGS)
-    if env_value:
-        return True
+    if env_value is not None:
+        return env_value
+    if CREATOR_VIP_FLAG is not None:
+        return CREATOR_VIP_FLAG
     setting_value = db.get_setting("vip_branding_disabled", "false")
     return _str_to_bool(setting_value, False)
 
@@ -1358,6 +1498,8 @@ def apply_env_overrides() -> None:
         "creator_branding_enabled": os.getenv("CREATOR_BRANDING_ENABLED"),
         "vip_branding_disabled": os.getenv("VIP_BRANDING_DISABLED"),
     }
+    if overrides.get("vip_branding_disabled") is None and CREATOR_VIP_FLAG is not None:
+        overrides["vip_branding_disabled"] = "true" if CREATOR_VIP_FLAG else "false"
     for key, value in overrides.items():
         if value is None:
             continue
