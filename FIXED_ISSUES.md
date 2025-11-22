@@ -31,6 +31,30 @@ pip install pyTelegramBotAPI psutil aiocryptopay
 python3 creator_updated_fixed.py
 ```
 
+## 5. Исправлена ошибка "name 'chat_id' is not defined" в кнопке одобрения Flyer
+**Проблема:** При нажатии на кнопку "✅ Одобрить" для заявки на подключение Flyer возникала критическая ошибка:
+```
+2025-11-22 19:01:54,489 - CRITICAL - Критическая ошибка в callback: name 'chat_id' is not defined
+```
+
+**Причина:** В обработчике callback `handle_callback_query` использовалась неопределенная переменная `chat_id`.
+
+**Решение:** Заменена переменная `chat_id` на `user_id` в четырех местах обработчика flyer_op (строки 5575, 5580, 5596, 5605).
+
+## 6. Исправлена ошибка "TypeError: escape_markdown() got an unexpected keyword argument 'version'" в ref_bot
+**Проблема:** При попытке просмотра списка рефералов возникала ошибка:
+```
+TypeError: escape_markdown() got an unexpected keyword argument 'version'
+```
+
+**Причина:** Функция `escape_markdown` из библиотеки pyTelegramBotAPI не принимает параметр `version`, но в коде он использовался.
+
+**Решение:** 
+1. Удален параметр `version=2` из определения fallback функции `escape_markdown` (строка 7)
+2. Удален параметр `version=1` из вызова `escape_markdown` в функции `format_username_md` (строка 63)
+
+Теперь список рефералов работает корректно.
+
 ## Примечания:
 - Убедитесь, что токены бота и Crypto Pay правильно настроены в файле
 - Проверьте, что ADMIN_ID соответствует вашему Telegram ID

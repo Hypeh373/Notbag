@@ -4,7 +4,7 @@ from telebot import types
 try:
     from telebot.formatting import escape_markdown
 except ImportError:
-    def escape_markdown(text, version=2):
+    def escape_markdown(text):
         """
         Minimal fallback to escape Markdown special characters when telebot.formatting is unavailable.
         """
@@ -60,7 +60,7 @@ def format_username_md(username):
     """Возвращает username, экранированный для Markdown, чтобы сохранить символы вроде '_'."""
     if not username:
         return "N/A"
-    return escape_markdown(f"@{username}", version=1)
+    return escape_markdown(f"@{username}")
 
 main_db_lock = threading.Lock() 
 bot_db_lock = threading.RLock()

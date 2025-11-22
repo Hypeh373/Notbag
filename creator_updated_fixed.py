@@ -5572,12 +5572,12 @@ if __name__ == '__main__':
                                       f"👥 <b>Пользователей в боте:</b> {user_count}\n"
                                       f"🔑 <b>Токен:</b> <code>{escape(bot_info['bot_token'] or 'НЕ УСТАНОВЛЕН')}</code>\n")
 
-                        msg = bot.edit_message_text(admin_text + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        msg = bot.edit_message_text(admin_text + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", user_id, call.message.message_id, parse_mode="HTML")
                         set_user_state(user_id, {
                             'action': 'admin_set_flyer_key', 'bot_id': bot_id, 'target_user_id': target_user_id,
                             'message_id': msg.message_id, 'original_text': admin_text
                         })
-                        bot.send_message(chat_id, f"🔑 Введите Flyer API ключ для бота #{bot_id}:", reply_markup=create_cancel_markup())
+                        bot.send_message(user_id, f"🔑 Введите Flyer API ключ для бота #{bot_id}:", reply_markup=create_cancel_markup())
 
                     elif action == 'decline':
                         bot.send_message(target_user_id, f"❌ Ваша заявка на подключение Flyer для бота #{bot_id} была *отклонена*.")
@@ -5593,7 +5593,7 @@ if __name__ == '__main__':
                                       f"👥 <b>Пользователей в боте:</b> {user_count}\n"
                                       f"🔑 <b>Токен:</b> <code>{escape(bot_info['bot_token'] or 'НЕ УСТАНОВЛЕН')}</code>\n")
 
-                        bot.edit_message_text(admin_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        bot.edit_message_text(admin_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", user_id, call.message.message_id, parse_mode="HTML")
                         bot.answer_callback_query(call.id)
                     
                     elif action == 'reply':
@@ -5602,7 +5602,7 @@ if __name__ == '__main__':
                             'action': 'admin_reply_text', 'target_user_id': target_user_id, 'bot_id': bot_id,
                             'message_id': call.message.message_id, 'call_id': call.id
                         })
-                        bot.send_message(chat_id, "Введите текст сообщения для пользователя:", reply_markup=create_cancel_markup())
+                        bot.send_message(user_id, "Введите текст сообщения для пользователя:", reply_markup=create_cancel_markup())
                 return
 
             if call.data == "dummy": bot.answer_callback_query(call.id); return
