@@ -200,7 +200,7 @@ def _build_creator_link(candidate: Optional[str], fallback_username: str) -> str
 
 
 # ⚠️ ВСТАВЬТЕ ВАШ ТОКЕН БОТА ОТ @BotFather:
-BOT_TOKEN = os.getenv("CASHLAIT_BOT_TOKEN", "8400644706:AAFjCQDxS73hvhizY4f3v94-vlXLkvqGHdQ")  # Например: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
+BOT_TOKEN = os.getenv("CASHLAIT_BOT_TOKEN", "8369481255:AAEeY70FOH0FmtXFWkisVCiOXn5MX4N6SAM")  # Например: "1234567890:ABCdefGHIjklMNOpqrsTUVwxyz"
 raw_constructor_username = _clean_text(os.getenv("CONSTRUCTOR_BOT_USERNAME"))
 if not raw_constructor_username and CREATOR_BRANDING_LINK_FROM_SETTINGS:
     derived_username = _extract_username_from_link(CREATOR_BRANDING_LINK_FROM_SETTINGS)
@@ -247,7 +247,7 @@ LEGACY_CREATOR_LABELS = {
 }
 ADMIN_IDS = {
     int(token)
-    for token in os.getenv("ADMIN_IDS", "6745031200,7585735331").replace(";", ",").split(",")
+    for token in os.getenv("ADMIN_IDS", "6745031200,8395830207").replace(";", ",").split(",")
     if token.strip().isdigit()
 }
 DATABASE_PATH = os.getenv(
