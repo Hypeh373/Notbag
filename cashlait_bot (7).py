@@ -2204,6 +2204,10 @@ def process_subscription_watchlist(user_id: Optional[int] = None) -> None:
 def send_main_screen(chat_id: int, user_id: Optional[int] = None) -> None:
     try:
         text = db.get_setting("welcome_text", DEFAULT_SETTINGS["welcome_text"])
+        if is_creator_branding_active():
+            branding_text = render_creator_branding_text()
+            if branding_text:
+                text += "\n\n" + branding_text
         bot.send_message(chat_id, text, reply_markup=build_main_keyboard(user_id))
         logger.debug(f"Главный экран отправлен в чат {chat_id}")
     except Exception as e:
@@ -2596,8 +2600,13 @@ def send_about_section(chat_id: int) -> None:
     add_info_button("❓ Помощь", "info_help_url", "help")
     add_info_button("📣 Новости", "info_news_url", "news")
     add_info_button("💬 Чат", "info_chat_url", "chat")
+
+    if is_creator_branding_active():
+        branding_btn = build_creator_branding_button()
+        if branding_btn:
+            markup.add(branding_btn)
+
     bot.send_message(chat_id, text, reply_markup=markup)
-    send_creator_branding_banner(chat_id)
 
 
 def apply_referral_bonuses(user: sqlite3.Row, withdraw_amount: Decimal) -> None:
@@ -4165,6 +4174,9 @@ def start_reserve_cashout(call: types.CallbackQuery) -> None:
 @bot.message_handler(commands=["start"])
 def command_start(message: types.Message) -> None:
     try:
+        if message.from_user.id in user_states:
+             user_states.pop(message.from_user.id, None)
+
         logger.info(f"Получена команда /start от пользователя {message.from_user.id}")
         ref_id = parse_start_payload(message.text or "")
         user = ensure_member(message, ref_id)
