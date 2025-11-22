@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
 import telebot
 from telebot import types
+from telebot.util import escape_markdown
 import sqlite3
 import sys
 import os
@@ -40,6 +41,12 @@ BOT_DB_NAME = f'dbs/bot_{BOT_ID}_data.db'
 START_TIME = datetime.now()
 SETTINGS = {}
 user_states = {}
+
+def format_username_md(username):
+    """Возвращает username, экранированный для Markdown, чтобы сохранить символы вроде '_'."""
+    if not username:
+        return "N/A"
+    return escape_markdown(f"@{username}", version=1)
 
 main_db_lock = threading.Lock() 
 bot_db_lock = threading.RLock()
@@ -912,7 +919,7 @@ def process_state_input(message):
         bot.send_message(user_id, "✅ Ваша заявка на вывод принята!", reply_markup=create_main_menu(user_id))
         
         username = message.from_user.username
-        username_str = f"(@{username})" if username else ""
+        username_str = f"({format_username_md(username)})" if username else ""
         admin_text = f"🚨 Новая заявка на вывод №{w_id}\n\nПользователь: `{user_id}` {username_str}\nСумма: `{amount:.2f} ₽`\nРеквизиты: `{escape(details)}`"
         admin_markup = types.InlineKeyboardMarkup().add(types.InlineKeyboardButton("✅ Одобрить", callback_data=f"admin_wd_approve_{w_id}"), types.InlineKeyboardButton("❌ Отклонить", callback_data=f"admin_wd_decline_{w_id}"))
         for admin_id in SETTINGS.get('admins', []):
@@ -1199,8 +1206,14 @@ def show_user_referrals(admin_id, call, target_user_id, page):
     total_res = db_query("SELECT COUNT(*) as count FROM users WHERE referrer_l1_id = ?", (target_user_id,), fetchone=True)
     total = total_res['count'] if total_res else 0
     text = f"👥 *Рефералы пользователя `{target_user_id}` (Всего: {total})*\n\n"
-    if not refs: text += "Нет рефералов."
-    else: text += "\n".join([f"ID: `{r['user_id']}` (@{r['username'] or 'N/A'}) - {r['registration_date'].strftime('%d.%m.%Y')}" for r in refs])
+    if not refs:
+        text += "Нет рефералов."
+    else:
+        lines = []
+        for r in refs:
+            username_display = format_username_md(r['username']) if r['username'] else "N/A"
+            lines.append(f"ID: `{r['user_id']}` ({username_display}) - {r['registration_date'].strftime('%d.%m.%Y')}")
+        text += "\n".join(lines)
     total_pages = (total + per_page - 1) // per_page if total > 0 else 1
     markup = types.InlineKeyboardMarkup()
     if total_pages > 1:
