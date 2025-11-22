@@ -1114,8 +1114,10 @@ def start_bot_process(bot_id):
         else:
             return False, "Неизвестный тип бота."
         
-        if not bot_info['vip_status']:
-            env['CREATOR_BRANDING'] = 'true'
+        if bot_info['vip_status']:
+            env['VIP_BRANDING_DISABLED'] = 'true'
+        else:
+            env.setdefault('CREATOR_BRANDING', 'true')
         
         # Ensure logs directory exists
         if not os.path.exists('logs'):

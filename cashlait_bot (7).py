@@ -2060,19 +2060,14 @@ def process_subscription_watchlist(user_id: Optional[int] = None) -> None:
 
 
 def send_main_screen(chat_id: int, user_id: Optional[int] = None) -> None:
-    branding_enabled = is_creator_branding_active()
     try:
         text = db.get_setting("welcome_text", DEFAULT_SETTINGS["welcome_text"])
         bot.send_message(chat_id, text, reply_markup=build_main_keyboard(user_id))
-        if branding_enabled:
-            send_creator_branding_banner(chat_id)
         logger.debug(f"Главный экран отправлен в чат {chat_id}")
     except Exception as e:
         logger.error(f"Ошибка при отправке главного экрана в чат {chat_id}: {e}", exc_info=True)
         try:
             bot.send_message(chat_id, "Добро пожаловать! Используйте меню ниже.", reply_markup=build_main_keyboard(user_id))
-            if branding_enabled:
-                send_creator_branding_banner(chat_id)
         except:
             pass
 
@@ -2459,10 +2454,8 @@ def send_about_section(chat_id: int) -> None:
     add_info_button("❓ Помощь", "info_help_url", "help")
     add_info_button("📣 Новости", "info_news_url", "news")
     add_info_button("💬 Чат", "info_chat_url", "chat")
-    brand_button = build_creator_branding_button()
-    if brand_button:
-        markup.add(brand_button)
     bot.send_message(chat_id, text, reply_markup=markup)
+    send_creator_branding_banner(chat_id)
 
 
 def apply_referral_bonuses(user: sqlite3.Row, withdraw_amount: Decimal) -> None:
