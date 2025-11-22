@@ -4212,11 +4212,29 @@ def handle_admin_callbacks(call):
         if wd_action == 'approve':
             db_execute("UPDATE creator_withdrawals SET status = 'approved' WHERE id = ?", (wd_id,), commit=True)
             bot.send_message(target_user_id, f"✅ Ваша заявка на вывод {wd_info['amount']:.2f} ₽ одобрена и будет выплачена в ближайшее время.")
+            
+            user_info = get_user(wd_info['user_id'])
+            username = escape(user_info['username'] or "N/A")
+            text = (f"<b>📬 Заявка на вывод №{wd_id}</b>\n\n"
+                    f"👤 Пользователь: <code>{wd_info['user_id']}</code> (@{username})\n"
+                    f"💰 Сумма: <code>{wd_info['amount']:.2f} ₽</code>\n"
+                    f"💳 Реквизиты: <code>{escape(wd_info['details'])}</code>\n"
+                    f"Статус: <code>{wd_info['status']}</code>")
+            
             bot.edit_message_text(text + "\n\n<b>Статус: ✅ ОДОБРЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML", reply_markup=None)
         elif wd_action == 'decline':
             db_execute("UPDATE creator_withdrawals SET status = 'declined' WHERE id = ?", (wd_id,), commit=True)
             db_execute("UPDATE users SET balance = balance + ? WHERE user_id = ?", (wd_info['amount'], target_user_id), commit=True)
             bot.send_message(target_user_id, f"❌ Ваша заявка на вывод {wd_info['amount']:.2f} ₽ отклонена. Средства возвращены на баланс.")
+            
+            user_info = get_user(wd_info['user_id'])
+            username = escape(user_info['username'] or "N/A")
+            text = (f"<b>📬 Заявка на вывод №{wd_id}</b>\n\n"
+                    f"👤 Пользователь: <code>{wd_info['user_id']}</code> (@{username})\n"
+                    f"💰 Сумма: <code>{wd_info['amount']:.2f} ₽</code>\n"
+                    f"💳 Реквизиты: <code>{escape(wd_info['details'])}</code>\n"
+                    f"Статус: <code>{wd_info['status']}</code>")
+
             bot.edit_message_text(text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML", reply_markup=None)
         elif wd_action == 'reply':
             msg = bot.send_message(chat_id, f"Введите текст сообщения для пользователя {target_user_id}:", reply_markup=create_cancel_markup())
@@ -5285,16 +5303,40 @@ if __name__ == '__main__':
                     
                     if action == 'approve':
                         bot.answer_callback_query(call.id)
-                        msg = bot.edit_message_text(escape(call.message.text) + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        
+                        bot_info = get_bot_by_id(bot_id)
+                        owner = get_user(target_user_id)
+                        user_count = get_child_bot_user_count(bot_id, bot_info['bot_type'])
+                        bot_username = escape(bot_info['bot_username'] or "N/A")
+                        
+                        admin_text = (f"🔌 <b>Заявка на подключение Flyer</b>\n\n"
+                                      f"👤 <b>Владелец:</b> {escape(owner['username'] or 'N/A')} (ID: <code>{owner['user_id']}</code>)\n"
+                                      f"🤖 <b>Бот:</b> {escape(bot_username)} (ID: <code>{bot_id}</code>)\n"
+                                      f"👥 <b>Пользователей в боте:</b> {user_count}\n"
+                                      f"🔑 <b>Токен:</b> <code>{escape(bot_info['bot_token'] or 'НЕ УСТАНОВЛЕН')}</code>\n")
+
+                        msg = bot.edit_message_text(admin_text + "\n\n<b>Статус: ОЖИДАНИЕ КЛЮЧА</b>", chat_id, call.message.message_id, parse_mode="HTML")
                         set_user_state(user_id, {
                             'action': 'admin_set_flyer_key', 'bot_id': bot_id, 'target_user_id': target_user_id,
-                            'message_id': msg.message_id, 'original_text': escape(call.message.text)
+                            'message_id': msg.message_id, 'original_text': admin_text
                         })
                         bot.send_message(chat_id, f"🔑 Введите Flyer API ключ для бота #{bot_id}:", reply_markup=create_cancel_markup())
 
                     elif action == 'decline':
                         bot.send_message(target_user_id, f"❌ Ваша заявка на подключение Flyer для бота #{bot_id} была *отклонена*.")
-                        bot.edit_message_text(escape(call.message.text) + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
+                        
+                        bot_info = get_bot_by_id(bot_id)
+                        owner = get_user(target_user_id)
+                        user_count = get_child_bot_user_count(bot_id, bot_info['bot_type'])
+                        bot_username = escape(bot_info['bot_username'] or "N/A")
+                        
+                        admin_text = (f"🔌 <b>Заявка на подключение Flyer</b>\n\n"
+                                      f"👤 <b>Владелец:</b> {escape(owner['username'] or 'N/A')} (ID: <code>{owner['user_id']}</code>)\n"
+                                      f"🤖 <b>Бот:</b> {escape(bot_username)} (ID: <code>{bot_id}</code>)\n"
+                                      f"👥 <b>Пользователей в боте:</b> {user_count}\n"
+                                      f"🔑 <b>Токен:</b> <code>{escape(bot_info['bot_token'] or 'НЕ УСТАНОВЛЕН')}</code>\n")
+
+                        bot.edit_message_text(admin_text + "\n\n<b>Статус: ❌ ОТКЛОНЕНО</b>", chat_id, call.message.message_id, parse_mode="HTML")
                         bot.answer_callback_query(call.id)
                     
                     elif action == 'reply':
